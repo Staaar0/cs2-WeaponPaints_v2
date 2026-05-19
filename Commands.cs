@@ -798,12 +798,12 @@ public partial class WeaponPaints
 					AddTimer(2.0f, () => _playerWeaponImage.Remove(p.Slot), TimerFlags.STOP_ON_MAPCHANGE);
 				}
 
-				p.Print(Localizer["wp_skin_menu_select", selectedSkin]);
-				var playerSkins = GPlayerWeaponsInfo.GetOrAdd(p.Slot, new ConcurrentDictionary<CsTeam, ConcurrentDictionary<int, WeaponInfo>>());
+					p.Print(Localizer["wp_skin_menu_select", selectedSkin]);
+					var playerSkins = GPlayerWeaponsInfo.GetOrAdd(p.Slot, new ConcurrentDictionary<CsTeam, ConcurrentDictionary<int, WeaponInfo>>());
 
-				var teamsToCheck = p.TeamNum < 2
-					? new[] { CsTeam.Terrorist, CsTeam.CounterTerrorist }
-					: [p.Team];
+					var teamsToCheck = p.TeamNum < 2
+						? new[] { CsTeam.Terrorist, CsTeam.CounterTerrorist }
+						: [p.Team];
 
 				foreach (var team in teamsToCheck)
 				{
