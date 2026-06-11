@@ -1,4 +1,4 @@
-﻿using CounterStrikeSharp.API;
+using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Entities;
@@ -100,6 +100,7 @@ namespace WeaponPaints
 			if (Config.Additional.GloveEnabled)
 			{
 				GPlayersGlove.TryRemove(player.Slot, out _);
+				GPlayersNativeGlove.TryRemove(player.Slot, out _);
 			}
 			if (Config.Additional.AgentEnabled)
 			{
@@ -112,9 +113,12 @@ namespace WeaponPaints
 			if (Config.Additional.PinsEnabled)
 			{
 				GPlayersPin.TryRemove(player.Slot, out _);
+				GPlayersNativePin.TryRemove(player.Slot, out _);
 			}
 			
 			_temporaryPlayerWeaponWear.TryRemove(player.Slot, out _);
+			GPlayerWeaponPaintCustomizations.TryRemove(player.Slot, out _);
+			GPlayersPendingSeedWearInput.TryRemove(player.Slot, out _);
 			CommandsCooldown.Remove(player.Slot);
 			Players.Remove(player);
 
@@ -128,7 +132,8 @@ namespace WeaponPaints
 			if (Database != null)
 				WeaponSync = new WeaponSynchronization(Database, Config);
 
-			_fadeSeed = 0;
+			// keep the fade seed above 0, fade skins render black with seed 0
+			_fadeSeed = 1;
 			_nextItemId = MinimumCustomItemId;
 		}
 
