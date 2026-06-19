@@ -1,3 +1,4 @@
+using System.Globalization;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Menu;
@@ -366,7 +367,11 @@ namespace WeaponPaints
 				["paint"] = paint.Value,
 				["image"] = item["image"]?.ToString() ?? localSkin?["image"]?.ToString() ?? string.Empty,
 				["paint_name"] = paintName,
-				["legacy_model"] = legacyModel
+				["legacy_model"] = legacyModel,
+				["min_float"] = ReadFloat(item["min_float"]) ?? 0.0f,
+				["max_float"] = ReadFloat(item["max_float"]) ?? 1.0f,
+				["pattern_id"] = item["pattern"]?["id"]?.ToString() ?? string.Empty,
+				["pattern_name"] = item["pattern"]?["name"]?.ToString() ?? string.Empty
 			};
 		}
 
@@ -386,7 +391,11 @@ namespace WeaponPaints
 				["weapon_defindex"] = weaponDefIndex.Value,
 				["paint"] = paint.Value,
 				["image"] = item["image"]?.ToString() ?? string.Empty,
-				["paint_name"] = paintName
+				["paint_name"] = paintName,
+				["min_float"] = ReadFloat(item["min_float"]) ?? 0.0f,
+				["max_float"] = ReadFloat(item["max_float"]) ?? 1.0f,
+				["pattern_id"] = item["pattern"]?["id"]?.ToString() ?? string.Empty,
+				["pattern_name"] = item["pattern"]?["name"]?.ToString() ?? string.Empty
 			};
 		}
 
@@ -502,6 +511,12 @@ namespace WeaponPaints
 		private static int? TryReadInt(JToken? token)
 		{
 			return int.TryParse(token?.ToString(), out var value) ? value : null;
+		}
+
+		private static float? ReadFloat(JToken? token)
+		{
+			if (token == null) return null;
+			return float.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
 		}
 
 		private static string ReadDefIndex(JObject item)
