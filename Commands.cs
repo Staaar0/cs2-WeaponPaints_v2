@@ -512,7 +512,7 @@ public partial class WeaponPaints
 			return;
 		}
 
-		weaponInfo.Seed = Math.Clamp(seed, 0, 1000);
+		weaponInfo.Seed = GetSafeSeed(gloveDefIndex, weaponInfo.Paint, seed);
 		SavePaintCustomization(player.Slot, player.Team, gloveDefIndex, weaponInfo.Paint, weaponInfo);
 		RefreshPlayerGlovesAfterChatInput(player);
 		SyncWeaponPaintsAfterSeedWear(player);
@@ -531,7 +531,7 @@ public partial class WeaponPaints
 			return;
 		}
 
-		weaponInfo.Wear = ClampWearValue(wear);
+		weaponInfo.Wear = ClampWearValue(wear, gloveDefIndex, weaponInfo.Paint);
 		SavePaintCustomization(player.Slot, player.Team, gloveDefIndex, weaponInfo.Paint, weaponInfo);
 		ClearTemporaryWeaponWear(player.Slot, gloveDefIndex);
 		RefreshPlayerGlovesAfterChatInput(player);
@@ -545,8 +545,10 @@ public partial class WeaponPaints
 
 	private void ApplyKnifeSeed(CCSPlayerController player, CBasePlayerWeapon weapon, WeaponInfo weaponInfo, int seed)
 	{
-		weaponInfo.Seed = Math.Clamp(seed, 0, 1000);
-		SavePaintCustomization(player.Slot, player.Team, weapon.AttributeManager.Item.ItemDefinitionIndex, weaponInfo.Paint, weaponInfo);
+		var weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+
+		weaponInfo.Seed = GetSafeSeed(weaponDefIndex, weaponInfo.Paint, seed);
+		SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
 		RefreshWeapons(player);
 		SyncWeaponPaintsAfterSeedWear(player);
 
@@ -558,9 +560,11 @@ public partial class WeaponPaints
 
 	private void ApplyKnifeWear(CCSPlayerController player, CBasePlayerWeapon weapon, WeaponInfo weaponInfo, float wear)
 	{
-		weaponInfo.Wear = ClampWearValue(wear);
-		SavePaintCustomization(player.Slot, player.Team, weapon.AttributeManager.Item.ItemDefinitionIndex, weaponInfo.Paint, weaponInfo);
-		ClearTemporaryWeaponWear(player.Slot, weapon.AttributeManager.Item.ItemDefinitionIndex);
+		var weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+
+		weaponInfo.Wear = ClampWearValue(wear, weaponDefIndex, weaponInfo.Paint);
+		SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
+		ClearTemporaryWeaponWear(player.Slot, weaponDefIndex);
 		RefreshWeapons(player);
 		SyncWeaponPaintsAfterSeedWear(player);
 
@@ -622,7 +626,7 @@ public partial class WeaponPaints
 		var playerCustomizations = GPlayerWeaponPaintCustomizations.GetOrAdd(slot, _ => new ConcurrentDictionary<string, WeaponPaintCustomization>());
 		return playerCustomizations.GetOrAdd(GetPaintCustomizationKey(team, weaponDefIndex, paintId), _ => new WeaponPaintCustomization
 		{
-			Wear = DefaultFactoryNewWear,
+			Wear = ClampWearValue(DefaultFactoryNewWear, weaponDefIndex, paintId),
 			Seed = 0
 		});
 	}
@@ -632,14 +636,81 @@ public partial class WeaponPaints
 		if (paintId <= 0) return;
 
 		var customization = GetOrCreatePaintCustomization(slot, team, weaponDefIndex, paintId);
-		customization.Wear = ClampWearValue(weaponInfo.Wear);
-		customization.Seed = Math.Clamp(weaponInfo.Seed, 0, 1000);
+		customization.Wear = ClampWearValue(weaponInfo.Wear, weaponDefIndex, paintId);
+		customization.Seed = GetSafeSeed(weaponDefIndex, paintId, weaponInfo.Seed);
 	}
 
-	private static float ClampWearValue(float wear)
+	private static int GetSafeSeed(int weaponDefIndex, int paintId, int seed)
 	{
-		return Math.Clamp(wear, 0.0f, 1.0f);
+		return IsSeedBasedPaint(weaponDefIndex, paintId) ? Math.Clamp(seed, 0, 1000) : 0;
 	}
+
+	private static float ClampWearValue(float wear, int weaponDefIndex, int paintId)
+	{
+		if (float.IsNaN(wear) || float.IsInfinity(wear))
+		{
+			return GetMinWear(weaponDefIndex, paintId);
+		}
+
+		var min = GetMinWear(weaponDefIndex, paintId);
+		var max = GetMaxWear(weaponDefIndex, paintId);
+
+		if (max < min)
+		{
+			(max, min) = (min, max);
+		}
+
+		return Math.Clamp(wear, min, max);
+	}
+
+	private static float GetMinWear(int weaponDefIndex, int paintId)
+	{
+		return Math.Clamp(ReadFloat(GetPaintInfo(weaponDefIndex, paintId)?["min_float"]) ?? DefaultFactoryNewWear, 0.0f, 1.0f);
+	}
+
+	private static float GetMaxWear(int weaponDefIndex, int paintId)
+	{
+		return Math.Clamp(ReadFloat(GetPaintInfo(weaponDefIndex, paintId)?["max_float"]) ?? 1.0f, 0.0f, 1.0f);
+	}
+
+	private static JObject? GetPaintInfo(int weaponDefIndex, int paintId)
+	{
+		return SkinsList.Concat(GlovesList).FirstOrDefault(item =>
+			TryReadInt(item["weapon_defindex"]) == weaponDefIndex &&
+			TryReadInt(item["paint"]) == paintId);
+	}
+
+	private static bool IsSeedBasedPaint(int weaponDefIndex, int paintId)
+	{
+		if (GlovesList.Any(item =>
+			TryReadInt(item["weapon_defindex"]) == weaponDefIndex &&
+			TryReadInt(item["paint"]) == paintId)) return true;
+
+		var paintInfo = GetPaintInfo(weaponDefIndex, paintId);
+		if (paintInfo == null) return true;
+
+		var text = $"{paintInfo["paint_name"]} {paintInfo["pattern_id"]} {paintInfo["pattern_name"]}".ToLowerInvariant();
+		return SeedBasedPaintWords.Any(text.Contains);
+	}
+
+	private static int? TryReadInt(JToken? token)
+	{
+		return int.TryParse(token?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+	}
+
+	private static float? ReadFloat(JToken? token)
+	{
+		if (token == null) return null;
+		return float.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : null;
+	}
+
+	private static readonly string[] SeedBasedPaintWords =
+	{
+		"case hardened", "heat treated", "fade", "doppler", "marble", "slaughter",
+		"crimson web", "tiger tooth", "damascus", "stained", "blue steel", "rust coat",
+		"scorched", "boreal forest", "forest ddpat", "urban masked", "safari mesh",
+		"night stripe", "ddpat", "variicamo", "camo", "mesh"
+	};
 
 	private void ClearTemporaryWeaponWear(int slot, int weaponDefIndex)
 	{
@@ -817,8 +888,8 @@ public partial class WeaponPaints
 
 					var customization = GetOrCreatePaintCustomization(p.Slot, team, weaponDefIndex, paintId);
 					value.Paint = paintId;
-					value.Wear = customization.Wear;
-					value.Seed = customization.Seed;
+					value.Wear = ClampWearValue(customization.Wear, weaponDefIndex, paintId);
+					value.Seed = GetSafeSeed(weaponDefIndex, paintId, customization.Seed);
 					ClearTemporaryWeaponWear(p.Slot, weaponDefIndex);
 				}
 
@@ -1137,8 +1208,8 @@ public partial class WeaponPaints
 
 				var customization = GetOrCreatePaintCustomization(player.Slot, team, weaponDefindex, paint);
 				weaponInfo.Paint = paint;
-				weaponInfo.Wear = customization.Wear;
-				weaponInfo.Seed = customization.Seed;
+				weaponInfo.Wear = ClampWearValue(customization.Wear, weaponDefindex, paint);
+				weaponInfo.Seed = GetSafeSeed(weaponDefindex, paint, customization.Seed);
 			}
 		}
 		else
@@ -1580,6 +1651,7 @@ public partial class WeaponPaints
 			slotMenu.AddMenuOption(GetStickerSlotMenuLabel(player, capturedSlot), (menuPlayer, _) => OpenStickerSourceMenu(menuPlayer, capturedSlot));
 		}
 
+		slotMenu.AddMenuOption("All Slots", (menuPlayer, _) => OpenStickerSourceMenu(menuPlayer, -1));
 		slotMenu.AddMenuOption(Localizer["wp_sticker_remove_menu_title"], (menuPlayer, _) => OpenStickerRemoveMenu(menuPlayer));
 		slotMenu.Open(player);
 	}
@@ -1635,7 +1707,7 @@ public partial class WeaponPaints
 			return;
 		}
 
-		var sourceMenu = Utility.CreateMenu(Localizer["wp_sticker_source_menu_title", stickerSlot + 1]);
+		var sourceMenu = Utility.CreateMenu(Localizer["wp_sticker_source_menu_title", GetStickerSlotMenuTitle(stickerSlot)]);
 		if (sourceMenu == null) return;
 		sourceMenu.PostSelectAction = PostSelectAction.Nothing;
 
@@ -1774,7 +1846,7 @@ public partial class WeaponPaints
 	{
 		if (!Utility.IsPlayerValid(player) || player is null) return;
 
-		var stickerMenu = Utility.CreateMenu(Localizer["wp_sticker_list_menu_title", stickerSlot + 1]);
+		var stickerMenu = Utility.CreateMenu(Localizer["wp_sticker_list_menu_title", GetStickerSlotMenuTitle(stickerSlot)]);
 		if (stickerMenu == null) return;
 		stickerMenu.PostSelectAction = PostSelectAction.Nothing;
 
@@ -2080,25 +2152,34 @@ public partial class WeaponPaints
 		}
 
 		var stickerName = Localizer["wp_sticker_menu_remove"].Value;
+		var startSlot = stickerSlot == -1 ? 0 : stickerSlot;
+		var endSlot = stickerSlot == -1 ? 3 : stickerSlot;
+
 		if (selectedSticker == null)
 		{
-			weaponInfo.Stickers[stickerSlot] = new StickerInfo();
+			for (var slotIndex = startSlot; slotIndex <= endSlot; slotIndex++)
+			{
+				weaponInfo.Stickers[slotIndex] = new StickerInfo();
+			}
 		}
 		else
 		{
 			if (!uint.TryParse(selectedSticker["id"]?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var stickerId)) return;
 			stickerName = GetStickerMenuName(selectedSticker["name"]?.ToString() ?? stickerId.ToString());
 
-			weaponInfo.Stickers[stickerSlot] = new StickerInfo
+			for (var slotIndex = startSlot; slotIndex <= endSlot; slotIndex++)
 			{
-				Id = stickerId,
-				Schema = 0,
-				OffsetX = 0,
-				OffsetY = 0,
-				Wear = 0.0f,
-				Scale = 0,
-				Rotation = 0
-			};
+				weaponInfo.Stickers[slotIndex] = new StickerInfo
+				{
+					Id = stickerId,
+					Schema = 0,
+					OffsetX = 0,
+					OffsetY = 0,
+					Wear = 0.0f,
+					Scale = 0,
+					Rotation = 0
+				};
+			}
 		}
 
 		RefreshWeapons(player);
@@ -2106,7 +2187,7 @@ public partial class WeaponPaints
 
 		if (!string.IsNullOrEmpty(Localizer["wp_sticker_menu_select"]))
 		{
-			player.Print(Localizer["wp_sticker_menu_select", stickerName, stickerSlot + 1]);
+			player.Print(Localizer["wp_sticker_menu_select", stickerName, GetStickerSlotMenuTitle(stickerSlot)]);
 		}
 
 		AddTimer(0.05f, () =>
@@ -2207,6 +2288,11 @@ public partial class WeaponPaints
 		return string.IsNullOrWhiteSpace(stickerName)
 			? $"Slot {displaySlot}"
 			: $"Slot {displaySlot}: {stickerName}";
+	}
+
+	private static string GetStickerSlotMenuTitle(int stickerSlot)
+	{
+		return stickerSlot == -1 ? "All Slots" : (stickerSlot + 1).ToString(CultureInfo.InvariantCulture);
 	}
 
 	private bool TryGetActiveWeaponStickerInfoSilent(CCSPlayerController player, out WeaponInfo? weaponInfo)
