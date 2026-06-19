@@ -102,9 +102,11 @@ namespace WeaponPaints
 
 			weapon.AttributeManager.Item.CustomName = weaponInfo.Nametag;
 			weapon.FallbackPaintKit = weaponInfo.Paint;
-			
+
+			weaponInfo.Wear = ClampWearValue(weaponInfo.Wear, weaponDefIndex, weaponInfo.Paint);
+			weaponInfo.Seed = GetSafeSeed(weaponDefIndex, weaponInfo.Paint, weaponInfo.Seed);
+
 			weapon.FallbackSeed = weaponInfo is { Paint: 38, Seed: 0 } ? _fadeSeed++ : weaponInfo.Seed;
-			
 			weapon.FallbackWear = weaponInfo.Wear;
 			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle, "set item texture prefab", weapon.FallbackPaintKit);
 
@@ -445,6 +447,9 @@ namespace WeaponPaints
 					UpdatePlayerEconItemId(item);
 
 					item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+					weaponInfo.Wear = ClampWearValue(weaponInfo.Wear, gloveId, weaponInfo.Paint);
+					weaponInfo.Seed = GetSafeSeed(gloveId, weaponInfo.Paint, weaponInfo.Seed);
+
 					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture prefab", weaponInfo.Paint);
 					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture seed", weaponInfo.Seed);
 					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture wear", weaponInfo.Wear);
