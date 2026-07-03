@@ -149,6 +149,7 @@ namespace WeaponPaints
 				var json = File.ReadAllText(filePath);
 				var deserializedStickers = JsonConvert.DeserializeObject<List<JObject>>(json);
 				WeaponPaints.StickersList = deserializedStickers ?? [];
+				WeaponPaints.BuildStickerMenuCache();
 			}
 			catch (FileNotFoundException)
 			{
@@ -263,6 +264,7 @@ namespace WeaponPaints
 			WeaponPaints.MusicList = ConvertApiMusicToPluginMusic(musicJson);
 			WeaponPaints.PinsList = ConvertApiCollectiblesToPluginPins(collectiblesJson);
 			WeaponPaints.StickersList = ConvertApiStickersToPluginStickers(stickersJson);
+			WeaponPaints.BuildStickerMenuCache();
 
 			logger.LogInformation("Loaded skin data from online JSON API ({ApiUrl}, language {Language}).", baseUrl, apiLanguage);
 		}
