@@ -1713,9 +1713,12 @@ public partial class WeaponPaints
 
 		sourceMenu.AddMenuOption(BackMenuLabel, (menuPlayer, _) => OpenStickerSlotMenu(menuPlayer));
 
+		if (_stickerMenuEntries.Count != StickersList.Count)
+			BuildStickerMenuCache();
+
 		foreach (var source in StickerSources)
 		{
-			if (!StickersList.Any(sticker => GetStickerSource(sticker) == source)) continue;
+			if (!_stickerMenuEntries.Any(entry => entry.Source == source)) continue;
 
 			var sourceName = source;
 			if (sourceName == "Community / Workshop Stickers")
@@ -1747,9 +1750,9 @@ public partial class WeaponPaints
 
 		eventMenu.AddMenuOption(BackMenuLabel, (menuPlayer, _) => OpenStickerSourceMenu(menuPlayer, stickerSlot));
 
-		var eventGroups = StickersList
-			.Where(sticker => GetStickerSource(sticker) == stickerSource)
-			.Select(sticker => GetStickerEventGroup(sticker, stickerSource))
+		var eventGroups = _stickerMenuEntries
+			.Where(entry => entry.Source == stickerSource)
+			.Select(entry => entry.EventGroup)
 			.Where(group => !string.IsNullOrWhiteSpace(group))
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.OrderBy(group => GetStickerEventMenuOrder(stickerSource, group))
@@ -1790,9 +1793,9 @@ public partial class WeaponPaints
 			}
 		});
 
-		var stickerTypes = StickersList
-			.Where(sticker => GetStickerSource(sticker) == stickerSource && StickerMatchesGroup(sticker, stickerSource, stickerGroup))
-			.Select(sticker => GetStickerType(sticker["name"]?.ToString()))
+		var stickerTypes = _stickerMenuEntries
+			.Where(entry => entry.Source == stickerSource && StickerEntryMatchesGroup(entry, stickerGroup))
+			.Select(entry => entry.Type)
 			.Distinct()
 			.OrderBy(type => Array.IndexOf(StickerTypes, type));
 
@@ -1862,24 +1865,24 @@ public partial class WeaponPaints
 			}
 		});
 
-		var sortedStickers = StickersList.OrderBy(sticker => GetStickerMenuName(sticker["name"]?.ToString() ?? string.Empty), StringComparer.OrdinalIgnoreCase);
+		var sortedStickers = _stickerMenuEntries
+			.Where(entry => entry.Source == stickerSource)
+			.Where(entry => StickerEntryMatchesGroup(entry, stickerGroup))
+			.Where(entry => entry.Type == stickerType)
+			.OrderBy(entry => entry.MenuName, StringComparer.OrdinalIgnoreCase);
 
-		foreach (var sticker in sortedStickers)
+		foreach (var entry in sortedStickers)
 		{
-			if (GetStickerSource(sticker) != stickerSource) continue;
-			if (!StickerMatchesGroup(sticker, stickerSource, stickerGroup)) continue;
-			if (GetStickerType(sticker["name"]?.ToString()) != stickerType) continue;
 			if (!string.IsNullOrEmpty(stickerAudience))
 			{
 				var wantPlayerStickers = stickerAudience == "Players";
-				if (IsPlayerSticker(sticker) != wantPlayerStickers) continue;
+				if (entry.IsPlayer != wantPlayerStickers) continue;
 			}
 
-			var stickerName = GetStickerMenuName(sticker["name"]?.ToString() ?? string.Empty);
-			if (string.IsNullOrWhiteSpace(stickerName)) continue;
+			if (string.IsNullOrWhiteSpace(entry.MenuName)) continue;
 
-			var selectedSticker = sticker;
-			stickerMenu.AddMenuOption(stickerName, (menuPlayer, _) => ApplyStickerSelection(menuPlayer, stickerSlot, selectedSticker));
+			var selectedSticker = entry.Data;
+			stickerMenu.AddMenuOption(entry.MenuName, (menuPlayer, _) => ApplyStickerSelection(menuPlayer, stickerSlot, selectedSticker));
 		}
 
 		AddTimer(0.05f, () =>
@@ -1889,6 +1892,54 @@ public partial class WeaponPaints
 				stickerMenu.Open(player);
 			}
 		}, TimerFlags.STOP_ON_MAPCHANGE);
+	}
+
+	private sealed class StickerMenuEntry
+	{
+		public StickerMenuEntry(JObject data, string source, string eventGroup, string type, string menuName, bool isPlayer)
+		{
+			Data = data;
+			Source = source;
+			EventGroup = eventGroup;
+			Type = type;
+			MenuName = menuName;
+			IsPlayer = isPlayer;
+		}
+
+		public JObject Data { get; }
+		public string Source { get; }
+		public string EventGroup { get; }
+		public string Type { get; }
+		public string MenuName { get; }
+		public bool IsPlayer { get; }
+	}
+
+	private static List<StickerMenuEntry> _stickerMenuEntries = [];
+
+	internal static void BuildStickerMenuCache()
+	{
+		var entries = new List<StickerMenuEntry>(StickersList.Count);
+
+		foreach (var sticker in StickersList)
+		{
+			var source = GetStickerSource(sticker);
+			entries.Add(new StickerMenuEntry(
+				sticker,
+				source,
+				GetStickerEventGroup(sticker, source),
+				GetStickerType(sticker["name"]?.ToString()),
+				GetStickerMenuName(sticker["name"]?.ToString() ?? string.Empty),
+				IsPlayerSticker(sticker)));
+		}
+
+		_stickerMenuEntries = entries;
+	}
+
+	private static bool StickerEntryMatchesGroup(StickerMenuEntry entry, string stickerGroup)
+	{
+		if (string.IsNullOrEmpty(stickerGroup)) return true;
+
+		return string.Equals(entry.EventGroup, stickerGroup, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static string GetStickerSource(JObject sticker)
