@@ -1,3 +1,5 @@
+## ANY FUTURE UPDATES WILL BE ON: [WeaponSkins](https://github.com/Staaar0/WeaponSkins)
+
 # CS2-WeaponPaints
 
 # Organized Menus
