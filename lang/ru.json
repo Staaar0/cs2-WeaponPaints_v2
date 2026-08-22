@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Удалить все",
 	"wp_sticker_remove_all_done": "Все стикеры удалены",
 	"wp_sticker_no_applied": "Нет установленных стикеров",
-	"wp_sticker_vip_only": "{lightred}Эта команда доступна только VIP-игрокам."
+	"wp_sticker_vip_only": "{lightred}Эта команда доступна только VIP-игрокам.",
+	"wp_sticker_search": "Поиск...",
+	"wp_sticker_search_active": "Поиск: {0}",
+	"wp_sticker_search_prompt": "Введите часть {lime}названия стикера{default} в чат",
+	"wp_sticker_search_menu_title": "Поиск: {0}",
+	"wp_sticker_search_clear": "Сбросить поиск",
+	"wp_sticker_search_no_results": "Стикеры не найдены",
+	"wp_gen_code_too_long": "{lightred}Gen-код слишком длинный для чата.{default} Откройте консоль и используйте {lime}css_{0} <код>"
 }

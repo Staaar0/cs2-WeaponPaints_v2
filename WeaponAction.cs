@@ -139,22 +139,33 @@ namespace WeaponPaints
 			UpdatePlayerWeaponMeshGroupMask(player, weapon, isLegacyModel);
 		}
 		
+		private const float StickerRenderWearStep = 0.001f;
+		private const int StickerRenderWearMaxSteps = 21;
+
 		// silly method to update sticker when call RefreshWeapons()
 		private void IncrementWearForWeaponWithStickers(CCSPlayerController player, CBasePlayerWeapon weapon)
 		{
 			int weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
-			if (!HasChangedPaint(player, weaponDefIndex, out var weaponInfo) || weaponInfo == null ||
-			    weaponInfo.Stickers.Count <= 0) return;
-			
-			float wearIncrement = 0.001f;
+			if (!HasChangedPaint(player, weaponDefIndex, out var weaponInfo) || weaponInfo == null) return;
+
+			var playerWear = _temporaryPlayerWeaponWear.GetOrAdd(player.Slot, _ => new ConcurrentDictionary<(int, int), float>());
+			var wearKey = (weaponDefIndex, weaponInfo.Paint);
+
+			if (weaponInfo.Stickers.Count <= 0 && !playerWear.ContainsKey(wearKey)) return;
+
+			float wearIncrement = StickerRenderWearStep;
 			float currentWear = weaponInfo.Wear;
 
-			var playerWear = _temporaryPlayerWeaponWear.GetOrAdd(player.Slot, _ => new ConcurrentDictionary<int, float>());
-
 			float incrementedWear = playerWear.AddOrUpdate(
-				weaponDefIndex,
+				wearKey,
 				currentWear + wearIncrement,
-				(_, oldWear) => Math.Min(oldWear + wearIncrement, 1.0f)
+				(_, oldWear) =>
+				{
+					float next = oldWear + wearIncrement;
+					if (next <= currentWear || next > currentWear + StickerRenderWearMaxSteps * wearIncrement)
+						next = currentWear + wearIncrement;
+					return Math.Min(next, 1.0f);
+				}
 			);
 
 			weapon.FallbackWear = incrementedWear;
@@ -177,7 +188,7 @@ namespace WeaponPaints
 				CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
 					$"sticker slot {stickerSlot} id", ViewAsFloat(sticker.Id));
 
-				if (sticker.Schema != 0)
+				if (sticker.Schema != 0 || stickerSlot >= 4)
 					CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
 						$"sticker slot {stickerSlot} schema", ViewAsFloat(sticker.Schema));
 
@@ -202,7 +213,7 @@ namespace WeaponPaints
 			}
 
 			if (_temporaryPlayerWeaponWear.TryGetValue(player.Slot, out var playerWear) &&
-				playerWear.TryGetValue(weaponDefIndex, out float storedWear))
+				playerWear.TryGetValue((weaponDefIndex, weaponInfo.Paint), out float storedWear))
 			{
 				weapon.FallbackWear = storedWear;
 			}
@@ -229,6 +240,18 @@ namespace WeaponPaints
 				"keychain slot 0 offset z", keyChain.OffsetZ);
 			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
 				"keychain slot 0 seed", ViewAsFloat(keyChain.Seed));
+
+			if (keyChain.Pattern != 0)
+				CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
+					"keychain slot 0 pattern", ViewAsFloat(keyChain.Pattern));
+
+			if (keyChain.Sticker != 0)
+			{
+				CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
+					"keychain slot 0 sticker", ViewAsFloat(keyChain.Sticker));
+				CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle,
+					"keychain slot 0 highlight", ViewAsFloat(keyChain.Highlight));
+			}
 		}
 
 		private static void GiveKnifeToPlayer(CCSPlayerController? player)
@@ -412,7 +435,7 @@ namespace WeaponPaints
 					}, TimerFlags.STOP_ON_MAPCHANGE);
 		}
 
-		private void GivePlayerGloves(CCSPlayerController player)
+		private void GivePlayerGloves(CCSPlayerController player, bool applyImmediately = false, bool refreshKnife = true)
 		{
 			if (!Utility.IsPlayerValid(player) || (LifeState_t)player.LifeState != LifeState_t.LIFE_ALIVE) return;
 
@@ -421,58 +444,86 @@ namespace WeaponPaints
 				return;
 
 			var activeSlotCommand = GetActiveWeaponSlotCommand(player);
-			CEconItemView item = pawn.EconGloves;
+			var item = pawn.EconGloves;
+			var slot = player.Slot;
+			var steamId = player.SteamID;
+			var generation = _worldGeneration;
+			var revision = _gloveApplyRevision.AddOrUpdate(slot, 1, (_, current) => current + 1);
 
 			item.NetworkedDynamicAttributes.Attributes.RemoveAll();
 			item.AttributeList.Attributes.RemoveAll();
 
-			Instance.AddTimer(0.08f, () =>
-			{	
+			void ApplyGloves()
+			{
 				try
 				{
-					if (!player.IsValid)
+					if (_stopping || generation != _worldGeneration)
 						return;
 
-					if (!player.PawnIsAlive)
+					if (!_gloveApplyRevision.TryGetValue(slot, out var current) || current != revision)
 						return;
 
-					if (!GPlayersGlove.TryGetValue(player.Slot, out var gloveInfo) ||
-					    !gloveInfo.TryGetValue(player.Team, out var gloveId) ||
+					var currentPlayer = Utilities.GetPlayerFromSlot(slot);
+					if (!Utility.IsPlayerValid(currentPlayer) || currentPlayer!.SteamID != steamId)
+						return;
+
+					if (!currentPlayer.PawnIsAlive)
+						return;
+
+					var currentPawn = currentPlayer.PlayerPawn.Value;
+					if (currentPawn == null || !currentPawn.IsValid)
+						return;
+
+					var currentItem = currentPawn.EconGloves;
+
+					if (!GPlayersGlove.TryGetValue(currentPlayer.Slot, out var gloveInfo) ||
+					    !gloveInfo.TryGetValue(currentPlayer.Team, out var gloveId) ||
 					    gloveId == 0 ||
-					    !HasChangedPaint(player, gloveId, out var weaponInfo) || weaponInfo == null)
+					    !HasChangedPaint(currentPlayer, gloveId, out var weaponInfo) || weaponInfo == null)
+					{
+						RestorePlayerDefaultGloves(currentPlayer);
 						return;
+					}
 
-					item.ItemDefinitionIndex = gloveId;
+					currentItem.ItemDefinitionIndex = gloveId;
 					
-					UpdatePlayerEconItemId(item);
+					UpdatePlayerEconItemId(currentItem);
 
-					item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+					currentItem.NetworkedDynamicAttributes.Attributes.RemoveAll();
 					weaponInfo.Wear = ClampWearValue(weaponInfo.Wear, gloveId, weaponInfo.Paint);
 					weaponInfo.Seed = GetSafeSeed(gloveId, weaponInfo.Paint, weaponInfo.Seed);
 
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture prefab", weaponInfo.Paint);
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture seed", weaponInfo.Seed);
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.NetworkedDynamicAttributes.Handle, "set item texture wear", weaponInfo.Wear);
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.NetworkedDynamicAttributes.Handle, "set item texture prefab", weaponInfo.Paint);
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.NetworkedDynamicAttributes.Handle, "set item texture seed", weaponInfo.Seed);
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.NetworkedDynamicAttributes.Handle, "set item texture wear", weaponInfo.Wear);
 
-					item.AttributeList.Attributes.RemoveAll();
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.AttributeList.Handle, "set item texture prefab", weaponInfo.Paint);
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.AttributeList.Handle, "set item texture seed", weaponInfo.Seed);
-					CAttributeListSetOrAddAttributeValueByName.Invoke(item.AttributeList.Handle, "set item texture wear", weaponInfo.Wear);
+					currentItem.AttributeList.Attributes.RemoveAll();
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.AttributeList.Handle, "set item texture prefab", weaponInfo.Paint);
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.AttributeList.Handle, "set item texture seed", weaponInfo.Seed);
+					CAttributeListSetOrAddAttributeValueByName.Invoke(currentItem.AttributeList.Handle, "set item texture wear", weaponInfo.Wear);
 
-					item.Initialized = true;
+					currentItem.Initialized = true;
 				
-					TouchGloveState(pawn);
-					if (activeSlotCommand == "slot3")
+					TouchGloveState(currentPawn);
+					if (refreshKnife && activeSlotCommand == "slot3")
 					{
-						RefreshKnifeEntityForGloves(player);
+						RefreshKnifeEntityForGloves(currentPlayer);
 					}
 					else
 					{
-						RestoreActiveWeaponSlot(player, activeSlotCommand);
+						RestoreActiveWeaponSlot(currentPlayer, activeSlotCommand);
 					}
 				}
 				catch (Exception) { }
-			}, TimerFlags.STOP_ON_MAPCHANGE);
+			}
+
+			if (applyImmediately)
+			{
+				ApplyGloves();
+				return;
+			}
+
+			Instance.AddTimer(0.08f, ApplyGloves, TimerFlags.STOP_ON_MAPCHANGE);
 		}
 
 		private static int GetRandomPaint(int defindex)

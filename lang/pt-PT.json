@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Remover todos",
 	"wp_sticker_remove_all_done": "Todos os autocolantes foram removidos",
 	"wp_sticker_no_applied": "Nenhum autocolante aplicado",
-	"wp_sticker_vip_only": "{lightred}Este comando é apenas para jogadores VIP."
+	"wp_sticker_vip_only": "{lightred}Este comando é apenas para jogadores VIP.",
+	"wp_sticker_search": "Procurar...",
+	"wp_sticker_search_active": "Procura: {0}",
+	"wp_sticker_search_prompt": "Escreve parte do {lime}nome do autocolante{default} no chat",
+	"wp_sticker_search_menu_title": "Procura: {0}",
+	"wp_sticker_search_clear": "Limpar procura",
+	"wp_sticker_search_no_results": "Nenhum autocolante encontrado",
+	"wp_gen_code_too_long": "{lightred}O código gen é demasiado longo para o chat.{default} Abre a consola e usa {lime}css_{0} <código>"
 }

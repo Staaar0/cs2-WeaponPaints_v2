@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Noņemt visas",
 	"wp_sticker_remove_all_done": "Visas uzlīmes noņemtas",
 	"wp_sticker_no_applied": "Nav uzliktu uzlīmju",
-	"wp_sticker_vip_only": "{lightred}Šī komanda ir tikai VIP spēlētājiem."
+	"wp_sticker_vip_only": "{lightred}Šī komanda ir tikai VIP spēlētājiem.",
+	"wp_sticker_search": "Meklēt...",
+	"wp_sticker_search_active": "Meklēšana: {0}",
+	"wp_sticker_search_prompt": "Ieraksti daļu no {lime}uzlīmes nosaukuma{default} čatā",
+	"wp_sticker_search_menu_title": "Meklēšana: {0}",
+	"wp_sticker_search_clear": "Notīrīt meklēšanu",
+	"wp_sticker_search_no_results": "Uzlīmes nav atrastas",
+	"wp_gen_code_too_long": "{lightred}Gen kods ir pārāk garš čatam.{default} Atver konsoli un izmanto {lime}css_{0} <kods>"
 }

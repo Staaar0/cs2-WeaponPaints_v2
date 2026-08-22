@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Remover todos",
 	"wp_sticker_remove_all_done": "Todos os adesivos foram removidos",
 	"wp_sticker_no_applied": "Nenhum adesivo aplicado",
-	"wp_sticker_vip_only": "{lightred}Este comando é apenas para jogadores VIP."
+	"wp_sticker_vip_only": "{lightred}Este comando é apenas para jogadores VIP.",
+	"wp_sticker_search": "Pesquisar...",
+	"wp_sticker_search_active": "Pesquisa: {0}",
+	"wp_sticker_search_prompt": "Digite parte do {lime}nome do adesivo{default} no chat",
+	"wp_sticker_search_menu_title": "Pesquisa: {0}",
+	"wp_sticker_search_clear": "Limpar pesquisa",
+	"wp_sticker_search_no_results": "Nenhum adesivo encontrado",
+	"wp_gen_code_too_long": "{lightred}O código gen é longo demais para o chat.{default} Abra o console e use {lime}css_{0} <código>"
 }

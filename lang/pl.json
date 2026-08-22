@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Usuń wszystkie",
 	"wp_sticker_remove_all_done": "Wszystkie naklejki usunięte",
 	"wp_sticker_no_applied": "Brak założonych naklejek",
-	"wp_sticker_vip_only": "{lightred}Ta komenda jest dostępna tylko dla graczy VIP."
+	"wp_sticker_vip_only": "{lightred}Ta komenda jest dostępna tylko dla graczy VIP.",
+	"wp_sticker_search": "Szukaj...",
+	"wp_sticker_search_active": "Szukaj: {0}",
+	"wp_sticker_search_prompt": "Wpisz część {lime}nazwy naklejki{default} na czacie",
+	"wp_sticker_search_menu_title": "Szukaj: {0}",
+	"wp_sticker_search_clear": "Wyczyść wyszukiwanie",
+	"wp_sticker_search_no_results": "Nie znaleziono naklejek",
+	"wp_gen_code_too_long": "{lightred}Kod gen jest za długi na czat.{default} Otwórz konsolę i użyj {lime}css_{0} <kod>"
 }

@@ -30,5 +30,8 @@
 		public float OffsetY { get; set; }
 		public float OffsetZ { get; set; }
 		public uint Seed { get; set; }
+		public uint Pattern { get; set; }
+		public uint Sticker { get; set; }
+		public uint Highlight { get; set; }
 	}
 }

@@ -43,7 +43,8 @@ namespace WeaponPaints
 					        `weapon_sticker_2` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0' COMMENT 'id;schema;x;y;wear;scale;rotation',
 					        `weapon_sticker_3` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0' COMMENT 'id;schema;x;y;wear;scale;rotation',
 					        `weapon_sticker_4` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0' COMMENT 'id;schema;x;y;wear;scale;rotation',
-					        `weapon_keychain` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0' COMMENT 'id;x;y;z;seed',
+					        `weapon_sticker_5` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0' COMMENT 'id;schema;x;y;wear;scale;rotation',
+					        `weapon_keychain` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0;0' COMMENT 'id;x;y;z;seed;pattern;sticker;highlight',
 					        UNIQUE (`steamid`, `weapon_team`, `weapon_defindex`) -- Add unique constraint here
 					    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;",
 
@@ -100,6 +101,17 @@ namespace WeaponPaints
 					await transaction.RollbackAsync();
 					throw new Exception("[WeaponPaints] Unable to create tables!");
 				}
+
+				await using (var migrationConnection = await WeaponPaints.Database.GetConnectionAsync())
+				{
+					var stickerColumnExists = await migrationConnection.ExecuteScalarAsync<int>(
+						"SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'wp_player_skins' AND COLUMN_NAME = 'weapon_sticker_5'");
+
+					if (stickerColumnExists == 0)
+					{
+						await migrationConnection.ExecuteAsync("ALTER TABLE `wp_player_skins` ADD COLUMN `weapon_sticker_5` VARCHAR(128) NOT NULL DEFAULT '0;0;0;0;0;0;0' COMMENT 'id;schema;x;y;wear;scale;rotation' AFTER `weapon_sticker_4`");
+					}
+				}
 			}
 			catch (Exception ex)
 			{
@@ -149,7 +161,6 @@ namespace WeaponPaints
 				var json = File.ReadAllText(filePath);
 				var deserializedStickers = JsonConvert.DeserializeObject<List<JObject>>(json);
 				WeaponPaints.StickersList = deserializedStickers ?? [];
-				WeaponPaints.BuildStickerMenuCache();
 			}
 			catch (FileNotFoundException)
 			{
@@ -264,7 +275,6 @@ namespace WeaponPaints
 			WeaponPaints.MusicList = ConvertApiMusicToPluginMusic(musicJson);
 			WeaponPaints.PinsList = ConvertApiCollectiblesToPluginPins(collectiblesJson);
 			WeaponPaints.StickersList = ConvertApiStickersToPluginStickers(stickersJson);
-			WeaponPaints.BuildStickerMenuCache();
 
 			logger.LogInformation("Loaded skin data from online JSON API ({ApiUrl}, language {Language}).", baseUrl, apiLanguage);
 		}

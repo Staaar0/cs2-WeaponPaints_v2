@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Remove all",
 	"wp_sticker_remove_all_done": "All stickers removed",
 	"wp_sticker_no_applied": "No applied stickers",
-	"wp_sticker_vip_only": "{lightred}This command is for VIP players only."
+	"wp_sticker_vip_only": "{lightred}This command is for VIP players only.",
+	"wp_sticker_search": "Search...",
+	"wp_sticker_search_active": "Search: {0}",
+	"wp_sticker_search_prompt": "Type part of the {lime}sticker name{default} in chat",
+	"wp_sticker_search_menu_title": "Search: {0}",
+	"wp_sticker_search_clear": "Clear search",
+	"wp_sticker_search_no_results": "No stickers found",
+	"wp_gen_code_too_long": "{lightred}Gen code is too long for chat.{default} Open the console and use {lime}css_{0} <code>"
 }

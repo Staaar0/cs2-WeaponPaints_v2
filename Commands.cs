@@ -4,6 +4,7 @@ using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Admin;
+using CounterStrikeSharp.API.Modules.Entities;
 using CounterStrikeSharp.API.Modules.Entities.Constants;
 using CounterStrikeSharp.API.Modules.Menu;
 using CounterStrikeSharp.API.Modules.Timers;
@@ -16,6 +17,13 @@ public partial class WeaponPaints
 {
 	private static readonly ConcurrentDictionary<int, byte> GPlayersForceGloveKnifeRefresh = new();
 	private static readonly ConcurrentDictionary<int, PendingSeedWearInput> GPlayersPendingSeedWearInput = new();
+
+	private static readonly ConcurrentDictionary<int, string> GPlayersStickerSearch = new();
+	private static readonly ConcurrentDictionary<int, byte> GPlayersPendingStickerSearch = new();
+
+	private const int StickerSearchMaxResults = 64;
+
+	private const int GenCodeTruncationLength = 64;
 
 	private enum SeedWearInputKind
 	{
@@ -193,6 +201,25 @@ public partial class WeaponPaints
 			});
 		});
 
+		_config.Additional.CommandGen.ForEach(c =>
+		{
+			AddCommand($"css_{c}", "Apply gen code", (player, info) =>
+			{
+				if (!Utility.IsPlayerValid(player) || player == null) return;
+
+				if (!CanUseStickerCommand(player))
+				{
+					if (!string.IsNullOrEmpty(Localizer["wp_sticker_vip_only"]))
+					{
+						player.Print(Localizer["wp_sticker_vip_only"]);
+					}
+					return;
+				}
+
+				OnCommandGen(player, info);
+			});
+		});
+
 		if (Config.Additional.CommandKillEnabled)
 		{
 			_config.Additional.CommandKill.ForEach(c =>
@@ -210,6 +237,372 @@ public partial class WeaponPaints
 		{
 			OnCommandSkinRefresh(player, info);
 		});
+	}
+
+	private void WarnGenCodeTruncated(CCSPlayerController player, string code, bool fromInspectLink)
+	{
+		if (!fromInspectLink && code.Length < GenCodeTruncationLength) return;
+		if (string.IsNullOrEmpty(Localizer["wp_gen_code_too_long"])) return;
+
+		player.Print(Localizer["wp_gen_code_too_long", _config.Additional.CommandGen.FirstOrDefault() ?? "g"]);
+	}
+
+	private static readonly uint[] GenCodeCrcTable = BuildGenCodeCrcTable();
+
+	private static uint[] BuildGenCodeCrcTable()
+	{
+		var table = new uint[256];
+		for (uint i = 0; i < 256; i++)
+		{
+			var entry = i;
+			for (var bit = 0; bit < 8; bit++)
+				entry = (entry & 1) != 0 ? 0xEDB88320u ^ (entry >> 1) : entry >> 1;
+
+			table[i] = entry;
+		}
+
+		return table;
+	}
+
+	private static bool GenCodeChecksumValid(byte[] data)
+	{
+		if (data.Length < 5) return false;
+
+		var crc = 0xFFFFFFFFu;
+		for (var i = 0; i < data.Length - 4; i++)
+			crc = GenCodeCrcTable[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+
+		crc ^= 0xFFFFFFFFu;
+
+		var expected = (crc & 0xFFFF) ^ unchecked((uint)((ulong)(data.Length - 5) * crc));
+
+		return data[^4] == (byte)(expected >> 24)
+		       && data[^3] == (byte)(expected >> 16)
+		       && data[^2] == (byte)(expected >> 8)
+		       && data[^1] == (byte)expected;
+	}
+
+	private void OnCommandGen(CCSPlayerController? player, CommandInfo commandInfo)
+	{
+		if (player == null || !player.IsValid || WeaponSync == null) return;
+
+		var code = commandInfo.ArgString.Trim();
+
+		code = Uri.UnescapeDataString(code);
+
+		var previewMarker = "csgo_econ_action_preview";
+		var previewIndex = code.IndexOf(previewMarker, StringComparison.OrdinalIgnoreCase);
+		var fromInspectLink = previewIndex >= 0;
+		if (previewIndex >= 0)
+			code = code.Substring(previewIndex + previewMarker.Length).Trim();
+
+		byte[] data;
+		try
+		{
+			data = Convert.FromHexString(code);
+		}
+		catch
+		{
+			WarnGenCodeTruncated(player, code, fromInspectLink);
+			return;
+		}
+
+		if (data.Length < 8)
+		{
+			WarnGenCodeTruncated(player, code, fromInspectLink);
+			return;
+		}
+
+		if (data[0] != 0x00)
+		{
+			var mask = data[0];
+			for (var i = 0; i < data.Length; i++)
+				data[i] ^= mask;
+		}
+
+		if (!GenCodeChecksumValid(data))
+		{
+			WarnGenCodeTruncated(player, code, fromInspectLink);
+			return;
+		}
+
+		var body = data[1..^4];
+
+		var defindex = 0;
+		var paint = 0;
+		var seed = 0;
+		uint wearBits = 0;
+		var statTrak = false;
+		var statTrakCount = 0;
+		var nametag = "";
+		var stickerBlocks = new List<byte[]>();
+		var keychainBlocks = new List<byte[]>();
+
+		var pos = 0;
+		while (pos < body.Length)
+		{
+			var tag = ReadVarint(body, ref pos);
+			var field = tag >> 3;
+			var wire = tag & 7;
+
+			if (wire == 0)
+			{
+				var value = ReadVarint(body, ref pos);
+				if (field == 3) defindex = (int)value;
+				else if (field == 4) paint = (int)value;
+				else if (field == 7) wearBits = value;
+				else if (field == 8) seed = (int)value;
+				else if (field == 9) statTrak = true;
+				else if (field == 10) statTrakCount = (int)value;
+			}
+			else if (wire == 5)
+			{
+				pos += 4;
+			}
+			else if (wire == 1)
+			{
+				pos += 8;
+			}
+			else if (wire == 2)
+			{
+				var length = (int)ReadVarint(body, ref pos);
+				if (pos + length > body.Length)
+					return;
+
+				var block = body[pos..(pos + length)];
+				pos += length;
+
+				if (field == 11) nametag = System.Text.Encoding.UTF8.GetString(block);
+				else if (field == 12) stickerBlocks.Add(block);
+				else if (field == 20) keychainBlocks.Add(block);
+			}
+			else
+			{
+				return;
+			}
+		}
+
+		var weapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
+		if (weapon == null || !weapon.IsValid)
+			return;
+		if (weapon.DesignerName.Contains("knife") || weapon.DesignerName.Contains("bayonet"))
+			return;
+
+		var weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+		if (defindex != weaponDefIndex)
+		{
+			player.Print("This code does not match your active weapon.");
+			return;
+		}
+
+		var stickersBySlot = new Dictionary<int, StickerInfo>();
+		var maxSlot = -1;
+		var extraSlot = 0;
+		var zeroSchemaExtraSlot = 4;
+
+		foreach (var block in stickerBlocks)
+		{
+			var parsed = ReadInspectSticker(block);
+			if (parsed.Id == 0 || parsed.Slot < 0 || parsed.Slot > 31)
+				continue;
+
+			var slot = parsed.Slot;
+			uint schema = 0;
+
+			if (slot > 5 || stickersBySlot.ContainsKey(slot))
+			{
+				schema = (uint)parsed.Slot;
+
+				if (parsed.Slot == 0)
+				{
+					while (zeroSchemaExtraSlot <= 5 && stickersBySlot.ContainsKey(zeroSchemaExtraSlot))
+						zeroSchemaExtraSlot++;
+
+					if (zeroSchemaExtraSlot <= 5)
+					{
+						slot = zeroSchemaExtraSlot++;
+					}
+					else
+					{
+						while (extraSlot <= 5 && stickersBySlot.ContainsKey(extraSlot))
+							extraSlot++;
+
+						if (extraSlot > 5)
+							continue;
+
+						slot = extraSlot++;
+					}
+				}
+				else
+				{
+					while (extraSlot <= 5 && stickersBySlot.ContainsKey(extraSlot))
+						extraSlot++;
+
+					if (extraSlot > 5)
+						continue;
+
+					slot = extraSlot++;
+				}
+			}
+			else if (slot >= 4)
+			{
+				schema = (uint)parsed.Slot;
+			}
+
+			stickersBySlot[slot] = new StickerInfo
+			{
+				Id = parsed.Id,
+				Schema = schema,
+				Wear = parsed.Wear,
+				Scale = parsed.Scale,
+				Rotation = parsed.Rotation,
+				OffsetX = parsed.OffsetX,
+				OffsetY = parsed.OffsetY
+			};
+
+			if (slot > maxSlot)
+				maxSlot = slot;
+		}
+
+		var stickers = new List<StickerInfo>();
+		for (var slot = 0; slot <= maxSlot; slot++)
+			stickers.Add(stickersBySlot.TryGetValue(slot, out var info) ? info : new StickerInfo());
+
+		KeyChainInfo? keyChain = null;
+		if (keychainBlocks.Count > 0)
+		{
+			var parsed = ReadInspectSticker(keychainBlocks[0]);
+			if (parsed.Id != 0)
+			{
+				keyChain = new KeyChainInfo
+				{
+					Id = parsed.Id,
+					OffsetX = parsed.OffsetX,
+					OffsetY = parsed.OffsetY,
+					OffsetZ = parsed.OffsetZ,
+					Seed = parsed.Pattern,
+					Pattern = parsed.Pattern,
+					Sticker = parsed.Sticker,
+					Highlight = parsed.Sticker
+				};
+			}
+		}
+
+		var playerWeapons = GPlayerWeaponsInfo.GetOrAdd(player.Slot, new ConcurrentDictionary<CsTeam, ConcurrentDictionary<int, WeaponInfo>>());
+		var teamWeapons = playerWeapons.GetOrAdd(player.Team, new ConcurrentDictionary<int, WeaponInfo>());
+		var weaponInfo = teamWeapons.GetOrAdd(weaponDefIndex, new WeaponInfo());
+
+		if (weaponInfo.Paint > 0 && weaponInfo.Paint != paint)
+		{
+			SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
+		}
+
+		weaponInfo.Paint = paint;
+		weaponInfo.Seed = seed;
+		weaponInfo.Wear = ClampWearValue(BitConverter.Int32BitsToSingle((int)wearBits), weaponDefIndex, paint);
+		weaponInfo.Nametag = nametag;
+		weaponInfo.StatTrak = statTrak;
+		weaponInfo.StatTrakCount = statTrakCount;
+		weaponInfo.Stickers = stickers;
+		weaponInfo.KeyChain = keyChain;
+
+		var playerInfo = new PlayerInfo
+		{
+			UserId = player.UserId,
+			Slot = player.Slot,
+			Index = (int)player.Index,
+			SteamId = player.SteamID.ToString(),
+			Name = player.PlayerName,
+			IpAddress = player.IpAddress?.Split(":")[0]
+		};
+
+		RefreshWeapons(player);
+		_ = Task.Run(async () => await WeaponSync.SyncWeaponPaintsToDatabase(playerInfo));
+
+		player.Print("Gen code applied.");
+	}
+
+	private struct InspectSticker
+	{
+		public int Slot;
+		public uint Id;
+		public float Wear;
+		public float Scale;
+		public float Rotation;
+		public float OffsetX;
+		public float OffsetY;
+		public float OffsetZ;
+		public uint Pattern;
+		public uint Sticker;
+	}
+
+	private static uint ReadVarint(byte[] data, ref int pos)
+	{
+		uint result = 0;
+		var shift = 0;
+
+		while (pos < data.Length)
+		{
+			var b = data[pos++];
+			result |= (uint)(b & 0x7F) << shift;
+			if ((b & 0x80) == 0)
+				break;
+			shift += 7;
+		}
+
+		return result;
+	}
+
+	private static InspectSticker ReadInspectSticker(byte[] data)
+	{
+		var sticker = new InspectSticker();
+		var pos = 0;
+
+		while (pos < data.Length)
+		{
+			var tag = ReadVarint(data, ref pos);
+			var field = tag >> 3;
+			var wire = tag & 7;
+
+			if (wire == 0)
+			{
+				var value = ReadVarint(data, ref pos);
+				if (field == 1) sticker.Slot = (int)value;
+				else if (field == 2) sticker.Id = value;
+				else if (field == 10) sticker.Pattern = value;
+				else if (field == 12) sticker.Sticker = value;
+			}
+			else if (wire == 5)
+			{
+				if (pos + 4 > data.Length)
+					break;
+
+				var value = BitConverter.ToSingle(data, pos);
+				pos += 4;
+
+				if (field == 3) sticker.Wear = value;
+				else if (field == 4) sticker.Scale = value;
+				else if (field == 5) sticker.Rotation = value;
+				else if (field == 7) sticker.OffsetX = value;
+				else if (field == 8) sticker.OffsetY = value;
+				else if (field == 9) sticker.OffsetZ = value;
+			}
+			else if (wire == 1)
+			{
+				pos += 8;
+			}
+			else if (wire == 2)
+			{
+				var length = (int)ReadVarint(data, ref pos);
+				pos += length;
+			}
+			else
+			{
+				break;
+			}
+		}
+
+		return sticker;
 	}
 
 	private void OnCommandSkinRefresh(CCSPlayerController? player, CommandInfo command)
@@ -388,6 +781,29 @@ public partial class WeaponPaints
 	private HookResult OnPlayerChatSeedWearInput(CCSPlayerController? player, CommandInfo commandInfo)
 	{
 		if (!Utility.IsPlayerValid(player) || player is null) return HookResult.Continue;
+
+		if (GPlayersPendingStickerSearch.ContainsKey(player.Slot))
+		{
+			var query = commandInfo.GetArg(1)?.Trim();
+			if (string.IsNullOrWhiteSpace(query)) return HookResult.Continue;
+
+			query = query.Trim('"');
+			if (query.StartsWith('!') || query.StartsWith('/')) return HookResult.Continue;
+
+			GPlayersPendingStickerSearch.TryRemove(player.Slot, out _);
+			GPlayersStickerSearch[player.Slot] = query;
+
+			AddTimer(0.05f, () =>
+			{
+				if (Utility.IsPlayerValid(player))
+				{
+					OpenStickerSlotMenu(player);
+				}
+			}, TimerFlags.STOP_ON_MAPCHANGE);
+
+			return HookResult.Handled;
+		}
+
 		if (!GPlayersPendingSeedWearInput.TryGetValue(player.Slot, out var pending)) return HookResult.Continue;
 
 		var input = commandInfo.GetArg(1)?.Trim();
@@ -533,7 +949,7 @@ public partial class WeaponPaints
 
 		weaponInfo.Wear = ClampWearValue(wear, gloveDefIndex, weaponInfo.Paint);
 		SavePaintCustomization(player.Slot, player.Team, gloveDefIndex, weaponInfo.Paint, weaponInfo);
-		ClearTemporaryWeaponWear(player.Slot, gloveDefIndex);
+		ClearTemporaryWeaponWear(player.Slot, gloveDefIndex, weaponInfo.Paint);
 		RefreshPlayerGlovesAfterChatInput(player);
 		SyncWeaponPaintsAfterSeedWear(player);
 
@@ -564,7 +980,7 @@ public partial class WeaponPaints
 
 		weaponInfo.Wear = ClampWearValue(wear, weaponDefIndex, weaponInfo.Paint);
 		SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
-		ClearTemporaryWeaponWear(player.Slot, weaponDefIndex);
+		ClearTemporaryWeaponWear(player.Slot, weaponDefIndex, weaponInfo.Paint);
 		RefreshWeapons(player);
 		SyncWeaponPaintsAfterSeedWear(player);
 
@@ -638,6 +1054,51 @@ public partial class WeaponPaints
 		var customization = GetOrCreatePaintCustomization(slot, team, weaponDefIndex, paintId);
 		customization.Wear = ClampWearValue(weaponInfo.Wear, weaponDefIndex, paintId);
 		customization.Seed = GetSafeSeed(weaponDefIndex, paintId, weaponInfo.Seed);
+		customization.Stickers = CloneStickers(weaponInfo.Stickers);
+		customization.KeyChain = CloneKeyChain(weaponInfo.KeyChain);
+	}
+
+	private static void RestorePaintCustomization(WeaponInfo weaponInfo, WeaponPaintCustomization customization)
+	{
+		weaponInfo.Stickers = CloneStickers(customization.Stickers);
+		weaponInfo.KeyChain = CloneKeyChain(customization.KeyChain);
+	}
+
+	private static List<StickerInfo> CloneStickers(List<StickerInfo> stickers)
+	{
+		var copy = new List<StickerInfo>(stickers.Count);
+		foreach (var sticker in stickers)
+		{
+			copy.Add(new StickerInfo
+			{
+				Id = sticker.Id,
+				Schema = sticker.Schema,
+				OffsetX = sticker.OffsetX,
+				OffsetY = sticker.OffsetY,
+				Wear = sticker.Wear,
+				Scale = sticker.Scale,
+				Rotation = sticker.Rotation
+			});
+		}
+
+		return copy;
+	}
+
+	private static KeyChainInfo? CloneKeyChain(KeyChainInfo? keyChain)
+	{
+		if (keyChain == null) return null;
+
+		return new KeyChainInfo
+		{
+			Id = keyChain.Id,
+			OffsetX = keyChain.OffsetX,
+			OffsetY = keyChain.OffsetY,
+			OffsetZ = keyChain.OffsetZ,
+			Seed = keyChain.Seed,
+			Pattern = keyChain.Pattern,
+			Sticker = keyChain.Sticker,
+			Highlight = keyChain.Highlight
+		};
 	}
 
 	private static int GetSafeSeed(int weaponDefIndex, int paintId, int seed)
@@ -712,11 +1173,11 @@ public partial class WeaponPaints
 		"night stripe", "ddpat", "variicamo", "camo", "mesh"
 	};
 
-	private void ClearTemporaryWeaponWear(int slot, int weaponDefIndex)
+	private void ClearTemporaryWeaponWear(int slot, int weaponDefIndex, int paintId)
 	{
 		if (_temporaryPlayerWeaponWear.TryGetValue(slot, out var playerWear))
 		{
-			playerWear.TryRemove(weaponDefIndex, out _);
+			playerWear.TryRemove((weaponDefIndex, paintId), out _);
 		}
 	}
 
@@ -890,7 +1351,7 @@ public partial class WeaponPaints
 					value.Paint = paintId;
 					value.Wear = ClampWearValue(customization.Wear, weaponDefIndex, paintId);
 					value.Seed = GetSafeSeed(weaponDefIndex, paintId, customization.Seed);
-					ClearTemporaryWeaponWear(p.Slot, weaponDefIndex);
+					RestorePaintCustomization(value, customization);
 				}
 
 				var playerInfo = new PlayerInfo
@@ -1645,6 +2106,13 @@ public partial class WeaponPaints
 		if (slotMenu == null) return;
 		slotMenu.PostSelectAction = PostSelectAction.Nothing;
 
+		var activeSearch = GetStickerSearch(player);
+		slotMenu.AddMenuOption(
+			activeSearch == null
+				? Localizer["wp_sticker_search"].Value
+				: Localizer["wp_sticker_search_active", activeSearch].Value,
+			(menuPlayer, _) => StartStickerSearchInput(menuPlayer));
+
 		for (var slotIndex = 0; slotIndex < 4; slotIndex++)
 		{
 			var capturedSlot = slotIndex;
@@ -1669,30 +2137,83 @@ public partial class WeaponPaints
 
 		removeMenu.AddMenuOption(BackMenuLabel, (menuPlayer, _) => OpenStickerSlotMenu(menuPlayer));
 
-		var hasAppliedSticker = false;
 		for (var slotIndex = 0; slotIndex < 4; slotIndex++)
 		{
-			if (weaponInfo.Stickers.Count <= slotIndex || weaponInfo.Stickers[slotIndex].Id == 0) continue;
-
-			hasAppliedSticker = true;
 			var capturedSlot = slotIndex;
 			removeMenu.AddMenuOption(GetStickerSlotMenuLabel(player, capturedSlot), (menuPlayer, _) => ApplyStickerSelection(menuPlayer, capturedSlot, null));
 		}
 
-		if (hasAppliedSticker)
-		{
-			removeMenu.AddMenuOption(Localizer["wp_sticker_remove_all"], ApplyRemoveAllStickers);
-		}
-		else
-		{
-			removeMenu.AddMenuOption(Localizer["wp_sticker_no_applied"], (_, _) => { });
-		}
+		removeMenu.AddMenuOption(Localizer["wp_sticker_remove_all"], ApplyRemoveAllStickers);
 
 		AddTimer(0.05f, () =>
 		{
 			if (Utility.IsPlayerValid(player))
 			{
 				removeMenu.Open(player);
+			}
+		}, TimerFlags.STOP_ON_MAPCHANGE);
+	}
+
+	private static string? GetStickerSearch(CCSPlayerController player)
+	{
+		return GPlayersStickerSearch.TryGetValue(player.Slot, out var search) && !string.IsNullOrWhiteSpace(search)
+			? search
+			: null;
+	}
+
+	private void StartStickerSearchInput(CCSPlayerController? player)
+	{
+		if (!Utility.IsPlayerValid(player) || player is null) return;
+
+		GPlayersPendingStickerSearch[player.Slot] = 0;
+		player.Print(Localizer["wp_sticker_search_prompt"]);
+	}
+
+	private void OpenStickerSearchResultsMenu(CCSPlayerController? player, int stickerSlot, string query)
+	{
+		if (!Utility.IsPlayerValid(player) || player is null) return;
+
+		var resultsMenu = Utility.CreateMenu(Localizer["wp_sticker_search_menu_title", query]);
+		if (resultsMenu == null) return;
+		resultsMenu.PostSelectAction = PostSelectAction.Nothing;
+
+		resultsMenu.AddMenuOption(BackMenuLabel, (menuPlayer, _) => OpenStickerSlotMenu(menuPlayer));
+		resultsMenu.AddMenuOption(Localizer["wp_sticker_search_clear"], (menuPlayer, option) =>
+		{
+			if (!Utility.IsPlayerValid(menuPlayer) || menuPlayer is null) return;
+
+			GPlayersStickerSearch.TryRemove(menuPlayer.Slot, out _);
+			OpenStickerSourceMenu(menuPlayer, stickerSlot);
+		});
+
+		if (_stickerMenuEntries.Count != StickersList.Count)
+			BuildStickerMenuCache();
+
+		var matches = _stickerMenuEntries
+			.Where(entry => !string.IsNullOrWhiteSpace(entry.MenuName))
+			.Where(entry => entry.MenuName.Contains(query, StringComparison.OrdinalIgnoreCase))
+			.OrderBy(entry => entry.MenuName, StringComparer.OrdinalIgnoreCase)
+			.Take(StickerSearchMaxResults)
+			.ToList();
+
+		if (matches.Count == 0)
+		{
+			resultsMenu.AddMenuOption(Localizer["wp_sticker_search_no_results"], (_, _) => { });
+		}
+		else
+		{
+			foreach (var entry in matches)
+			{
+				var selectedSticker = entry.Data;
+				resultsMenu.AddMenuOption(entry.MenuName, (menuPlayer, _) => ApplyStickerSelection(menuPlayer, stickerSlot, selectedSticker));
+			}
+		}
+
+		AddTimer(0.05f, () =>
+		{
+			if (Utility.IsPlayerValid(player))
+			{
+				resultsMenu.Open(player);
 			}
 		}, TimerFlags.STOP_ON_MAPCHANGE);
 	}
@@ -1704,6 +2225,14 @@ public partial class WeaponPaints
 		if (StickersList.Count == 0)
 		{
 			player.Print(Localizer["wp_sticker_no_data"]);
+			return;
+		}
+
+		// With a search set, the slot opens straight onto the matches instead of the sources.
+		var search = GetStickerSearch(player);
+		if (search != null)
+		{
+			OpenStickerSearchResultsMenu(player, stickerSlot, search);
 			return;
 		}
 
@@ -1804,7 +2333,7 @@ public partial class WeaponPaints
 			var typeName = stickerType;
 			typeMenu.AddMenuOption(typeName, (menuPlayer, _) =>
 			{
-				if (stickerSource == "Major Stickers" && !TeamOnlyStickerEvents.Contains(stickerGroup, StringComparer.OrdinalIgnoreCase))
+				if (stickerSource == "Major Stickers" && ShouldOpenStickerAudienceMenu(stickerGroup, typeName))
 				{
 					OpenStickerAudienceMenu(menuPlayer, stickerSlot, stickerSource, stickerGroup, typeName);
 				}
@@ -2002,11 +2531,12 @@ public partial class WeaponPaints
 	{
 		var name = stickerName ?? string.Empty;
 
-		if (name.Contains("(Holo)", StringComparison.OrdinalIgnoreCase)) return "Holo";
-		if (name.Contains("(Foil)", StringComparison.OrdinalIgnoreCase)) return "Foil";
+		if (name.Contains("(Holo", StringComparison.OrdinalIgnoreCase)) return "Holo";
+		if (name.Contains("(Foil", StringComparison.OrdinalIgnoreCase)) return "Foil";
 		if (name.Contains("(Gold", StringComparison.OrdinalIgnoreCase)) return "Gold";
-		if (name.Contains("(Glitter)", StringComparison.OrdinalIgnoreCase)) return "Glitter";
-		if (name.Contains("(Lenticular)", StringComparison.OrdinalIgnoreCase)) return "Lenticular";
+		if (name.Contains("(Glitter", StringComparison.OrdinalIgnoreCase)) return "Glitter";
+		if (name.Contains("(Embroidered", StringComparison.OrdinalIgnoreCase)) return "Embroidered";
+		if (name.Contains("(Lenticular", StringComparison.OrdinalIgnoreCase)) return "Lenticular";
 
 		return "Normal";
 	}
@@ -2113,7 +2643,7 @@ public partial class WeaponPaints
 
 	private static readonly string[] StickerTypes =
 	[
-		"Normal", "Holo", "Foil", "Gold", "Glitter", "Lenticular"
+		"Normal", "Holo", "Foil", "Gold", "Glitter", "Embroidered", "Lenticular"
 	];
 
 	private static readonly string[] MajorStickerEvents =
@@ -2141,8 +2671,22 @@ public partial class WeaponPaints
 
 	private static readonly string[] TeamOnlyStickerEvents =
 	[
-		"Stockholm 2021", "2020 RMR", "DreamHack 2014", "Cologne 2014", "Katowice 2014", "DreamHack 2013"
+		"Stockholm 2021", "2020 RMR", "Katowice 2015", "DreamHack 2014", "Cologne 2014", "Katowice 2014", "DreamHack 2013"
 	];
+
+	private static readonly string[] DirectHoloStickerEvents =
+	[
+		"Berlin 2019", "London 2018", "Boston 2018", "Krakow 2017", "Atlanta 2017",
+		"Cologne 2016", "MLG Columbus 2016"
+	];
+
+	private static bool ShouldOpenStickerAudienceMenu(string stickerGroup, string stickerType)
+	{
+		if (TeamOnlyStickerEvents.Contains(stickerGroup, StringComparer.OrdinalIgnoreCase)) return false;
+
+		return !string.Equals(stickerType, "Holo", StringComparison.OrdinalIgnoreCase) ||
+		       !DirectHoloStickerEvents.Contains(stickerGroup, StringComparer.OrdinalIgnoreCase);
+	}
 
 	private static readonly string[] StickerTeamNames =
 	[
@@ -2233,6 +2777,11 @@ public partial class WeaponPaints
 			}
 		}
 
+		if (weaponInfo.Stickers.Count > 4)
+		{
+			weaponInfo.Stickers.RemoveRange(4, weaponInfo.Stickers.Count - 4);
+		}
+
 		RefreshWeapons(player);
 		SyncStickerChange(player);
 
@@ -2254,18 +2803,15 @@ public partial class WeaponPaints
 	{
 		if (!Utility.IsPlayerValid(player) || player is null || WeaponSync == null) return;
 
-		if (!TryGetActiveWeaponStickerInfo(player, out _, out _, out var weaponInfo) || weaponInfo == null)
+		if (!TryGetActiveWeaponStickerInfo(player, out var weapon, out var weaponDefIndex, out var weaponInfo) || weaponInfo == null)
 			return;
 
-		while (weaponInfo.Stickers.Count < 4)
-		{
-			weaponInfo.Stickers.Add(new StickerInfo());
-		}
+		weaponInfo.Stickers.Clear();
+		weaponInfo.KeyChain = null;
+		SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
 
-		for (var slotIndex = 0; slotIndex < 4; slotIndex++)
-		{
-			weaponInfo.Stickers[slotIndex] = new StickerInfo();
-		}
+		if (weapon != null && weapon.IsValid)
+			GivePlayerWeaponSkin(player, weapon);
 
 		RefreshWeapons(player);
 		SyncStickerChange(player);
@@ -2788,12 +3334,29 @@ public partial class WeaponPaints
 		AddTimer(0.06f, () =>
 		{
 			if (!Utility.IsPlayerValid(player) || !player.PawnIsAlive) return;
+
 			var newKnife = new CBasePlayerWeapon(player.GiveNamedItem(GetDefaultKnifeForTeam(player)));
+			if (newKnife == null || !newKnife.IsValid) return;
+
+			var knifeHandle = newKnife.EntityHandle.Raw;
+			var playerSlot = player.Slot;
+			var steamId = player.SteamID;
+			var generation = _worldGeneration;
+
 			Server.NextFrame(() =>
 			{
-				if (!Utility.IsPlayerValid(player) || !player.PawnIsAlive) return;
-				if (newKnife != null && newKnife.IsValid) GivePlayerWeaponSkin(player, newKnife);
-				player.ExecuteClientCommand("slot3");
+				if (_stopping || generation != _worldGeneration) return;
+
+				var currentPlayer = Utilities.GetPlayerFromSlot(playerSlot);
+				if (!Utility.IsPlayerValid(currentPlayer) || currentPlayer!.SteamID != steamId || !currentPlayer.PawnIsAlive) return;
+
+				var knifePointer = EntitySystem.GetEntityByHandle(knifeHandle);
+				if (knifePointer is null || knifePointer == IntPtr.Zero) return;
+
+				var currentKnife = new CBasePlayerWeapon(knifePointer.Value);
+				if (currentKnife.IsValid) GivePlayerWeaponSkin(currentPlayer, currentKnife);
+
+				currentPlayer.ExecuteClientCommand("slot3");
 			});
 		}, TimerFlags.STOP_ON_MAPCHANGE);
 	}

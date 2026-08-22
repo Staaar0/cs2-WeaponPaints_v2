@@ -60,5 +60,12 @@
 	"wp_sticker_remove_all": "Hepsini kaldır",
 	"wp_sticker_remove_all_done": "Tüm stickerlar kaldırıldı",
 	"wp_sticker_no_applied": "Uygulanmış sticker yok",
-	"wp_sticker_vip_only": "{lightred}Bu komut sadece VIP oyuncular içindir."
+	"wp_sticker_vip_only": "{lightred}Bu komut sadece VIP oyuncular içindir.",
+	"wp_sticker_search": "Ara...",
+	"wp_sticker_search_active": "Arama: {0}",
+	"wp_sticker_search_prompt": "Sohbete {lime}sticker adının{default} bir kısmını yaz",
+	"wp_sticker_search_menu_title": "Arama: {0}",
+	"wp_sticker_search_clear": "Aramayı temizle",
+	"wp_sticker_search_no_results": "Sticker bulunamadı",
+	"wp_gen_code_too_long": "{lightred}Gen kodu sohbet için çok uzun.{default} Konsolu aç ve {lime}css_{0} <kod>{default} kullan"
 }

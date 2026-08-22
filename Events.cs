@@ -11,6 +11,8 @@ namespace WeaponPaints
 	public partial class WeaponPaints
 	{
 		private bool _mvpPlayed;
+		private bool _stopping;
+		private int _worldGeneration;
 		
 		[GameEventHandler]
 		public HookResult OnClientFullConnect(EventPlayerConnectFull @event, GameEventInfo info)
@@ -117,6 +119,8 @@ namespace WeaponPaints
 			}
 			
 			_temporaryPlayerWeaponWear.TryRemove(player.Slot, out _);
+			GPlayersStickerSearch.TryRemove(player.Slot, out _);
+			GPlayersPendingStickerSearch.TryRemove(player.Slot, out _);
 			GPlayerWeaponPaintCustomizations.TryRemove(player.Slot, out _);
 			GPlayersPendingSeedWearInput.TryRemove(player.Slot, out _);
 			CommandsCooldown.Remove(player.Slot);
@@ -127,6 +131,8 @@ namespace WeaponPaints
 
 		private void OnMapStart(string mapName)
 		{
+			_worldGeneration++;
+
 			if (Config.Additional is { KnifeEnabled: false, SkinEnabled: false, GloveEnabled: false }) return;
 			
 			if (Database != null)
@@ -153,7 +159,7 @@ namespace WeaponPaints
 			GivePlayerAgent(player);
 			Server.NextFrame(() =>
 			{
-				GivePlayerGloves(player);
+				GivePlayerGloves(player, true, false);
 			});
 			GivePlayerPin(player);
 
@@ -211,16 +217,49 @@ namespace WeaponPaints
 			{
 				var itemServices = hook.GetParam<CCSPlayer_ItemServices>(0);
 				var weapon = hook.GetReturn<CBasePlayerWeapon>();
-				if (!weapon.DesignerName.Contains("weapon"))
+				if (weapon == null || !weapon.IsValid || !weapon.DesignerName.Contains("weapon"))
 					return HookResult.Continue;
 
 				var player = GetPlayerFromItemServices(itemServices);
-				if (player != null)
+				if (player == null)
+					return HookResult.Continue;
+
+				var weaponHandle = weapon.EntityHandle.Raw;
+				var playerSlot = player.Slot;
+				var steamId = player.SteamID;
+				var generation = _worldGeneration;
+
+				Server.NextWorldUpdate(() =>
 				{
-					GivePlayerWeaponSkin(player, weapon);
-				}
+					if (_stopping || generation != _worldGeneration)
+						return;
+
+					try
+					{
+						var weaponPointer = EntitySystem.GetEntityByHandle(weaponHandle);
+						if (weaponPointer is null || weaponPointer == IntPtr.Zero)
+							return;
+
+						var currentWeapon = new CBasePlayerWeapon(weaponPointer.Value);
+						if (!currentWeapon.IsValid || !currentWeapon.DesignerName.Contains("weapon"))
+							return;
+
+						var currentPlayer = Utilities.GetPlayerFromSlot(playerSlot);
+						if (!Utility.IsPlayerValid(currentPlayer) || currentPlayer!.SteamID != steamId)
+							return;
+
+						GivePlayerWeaponSkin(currentPlayer, currentWeapon);
+					}
+					catch (Exception ex)
+					{
+						Logger.LogWarning(ex, "Failed to apply weapon skin after GiveNamedItem.");
+					}
+				});
 			}
-			catch { }
+			catch (Exception ex)
+			{
+				Logger.LogWarning(ex, "Failed to process GiveNamedItem skin application.");
+			}
 
 			return HookResult.Continue;
 		}
@@ -231,10 +270,21 @@ namespace WeaponPaints
 
 			if (designerName.Contains("weapon"))
 			{
+				var entityHandle = entity.EntityHandle.Raw;
+				var generation = _worldGeneration;
+
 				Server.NextWorldUpdate(() =>
 				{
-					var weapon = new CBasePlayerWeapon(entity.Handle);
-					if (!weapon.IsValid) return;
+					if (_stopping || generation != _worldGeneration)
+						return;
+
+					var weaponPointer = EntitySystem.GetEntityByHandle(entityHandle);
+					if (weaponPointer is null || weaponPointer == IntPtr.Zero)
+						return;
+
+					var weapon = new CBasePlayerWeapon(weaponPointer.Value);
+					if (!weapon.IsValid)
+						return;
 
 					try
 					{
@@ -243,7 +293,7 @@ namespace WeaponPaints
 						if (weapon.OriginalOwnerXuidLow > 0)
 							steamid = new SteamID(weapon.OriginalOwnerXuidLow);
 
-						CCSPlayerController? player;
+						CCSPlayerController? player = null;
 
 						if (steamid != null && steamid.IsValid())
 						{
@@ -254,13 +304,22 @@ namespace WeaponPaints
 						}
 						else
 						{
-							CCSWeaponBaseGun gun = weapon.As<CCSWeaponBaseGun>();
-							player = Utilities.GetPlayerFromIndex((int)weapon.OwnerEntity.Index) ?? Utilities.GetPlayerFromIndex((int)gun.OwnerEntity.Value!.Index);
+							var owner = weapon.OwnerEntity.Value;
+							if (owner != null && owner.IsValid)
+								player = Utilities.GetPlayerFromIndex((int)owner.Index);
+
+							if (player == null)
+							{
+								var gun = weapon.As<CCSWeaponBaseGun>();
+								var gunOwner = gun.OwnerEntity.Value;
+								if (gunOwner != null && gunOwner.IsValid)
+									player = Utilities.GetPlayerFromIndex((int)gunOwner.Index);
+							}
 						}
 
 						if (string.IsNullOrEmpty(player?.PlayerName)) return;
 						if (!Utility.IsPlayerValid(player)) return;
-						
+
 						GivePlayerWeaponSkin(player, weapon);
 					}
 					catch (Exception)
@@ -317,9 +376,18 @@ namespace WeaponPaints
 			
 			CBasePlayerWeapon? weapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
 
-			if (weapon == null) return HookResult.Continue;
+			if (weapon == null || !weapon.IsValid) return HookResult.Continue;
 
-			int weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
+			var weaponHandle = weapon.EntityHandle.Raw;
+			var weaponPointer = EntitySystem.GetEntityByHandle(weaponHandle);
+			if (weaponPointer is null || weaponPointer == IntPtr.Zero)
+				return HookResult.Continue;
+
+			var currentWeapon = new CBasePlayerWeapon(weaponPointer.Value);
+			if (!currentWeapon.IsValid)
+				return HookResult.Continue;
+
+			int weaponDefIndex = currentWeapon.AttributeManager.Item.ItemDefinitionIndex;
 
 			if (!HasChangedPaint(player, weaponDefIndex, out var weaponInfo) || weaponInfo == null)
 				return HookResult.Continue;
@@ -328,17 +396,33 @@ namespace WeaponPaints
 			
 			weaponInfo.StatTrakCount += 1;
 				
-			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle, "kill eater", ViewAsFloat((uint)weaponInfo.StatTrakCount));
-			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle, "kill eater score type", 0);
+			CAttributeListSetOrAddAttributeValueByName.Invoke(currentWeapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle, "kill eater", ViewAsFloat((uint)weaponInfo.StatTrakCount));
+			CAttributeListSetOrAddAttributeValueByName.Invoke(currentWeapon.AttributeManager.Item.NetworkedDynamicAttributes.Handle, "kill eater score type", 0);
 				
-			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.AttributeList.Handle, "kill eater", ViewAsFloat((uint)weaponInfo.StatTrakCount));
-			CAttributeListSetOrAddAttributeValueByName.Invoke(weapon.AttributeManager.Item.AttributeList.Handle, "kill eater score type", 0);
+			CAttributeListSetOrAddAttributeValueByName.Invoke(currentWeapon.AttributeManager.Item.AttributeList.Handle, "kill eater", ViewAsFloat((uint)weaponInfo.StatTrakCount));
+			CAttributeListSetOrAddAttributeValueByName.Invoke(currentWeapon.AttributeManager.Item.AttributeList.Handle, "kill eater score type", 0);
 
 			return HookResult.Continue;
 		}
 
+		public override void Unload(bool hotReload)
+		{
+			_stopping = true;
+			_worldGeneration++;
+
+			try
+			{
+				VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post);
+			}
+			catch (Exception ex)
+			{
+				Logger.LogWarning(ex, "Failed to unhook GiveNamedItem during unload.");
+			}
+		}
+
 		private void RegisterListeners()
 		{
+			_stopping = false;
 			RegisterListener<Listeners.OnMapStart>(OnMapStart);
 
 			RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);

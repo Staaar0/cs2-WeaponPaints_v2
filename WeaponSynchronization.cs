@@ -196,7 +196,7 @@ internal class WeaponSynchronization
 
 				KeyChainInfo keyChainInfo = new KeyChainInfo();
 
-				if (keyChainParts!.Length == 5 &&
+				if (keyChainParts!.Length >= 5 &&
 				    uint.TryParse(keyChainParts[0], out uint keyChainId) &&
 				    float.TryParse(keyChainParts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float keyChainOffsetX) &&
 				    float.TryParse(keyChainParts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float keyChainOffsetY) &&
@@ -209,6 +209,16 @@ internal class WeaponSynchronization
 					keyChainInfo.OffsetY = keyChainOffsetY;
 					keyChainInfo.OffsetZ = keyChainOffsetZ;
 					keyChainInfo.Seed = keyChainSeed;
+
+					if (keyChainParts.Length >= 8)
+					{
+						uint.TryParse(keyChainParts[5], out uint keyChainPattern);
+						uint.TryParse(keyChainParts[6], out uint keyChainSticker);
+						uint.TryParse(keyChainParts[7], out uint keyChainHighlight);
+						keyChainInfo.Pattern = keyChainPattern;
+						keyChainInfo.Sticker = keyChainSticker;
+						keyChainInfo.Highlight = keyChainHighlight;
+					}
 				}
 				else
 				{
@@ -233,15 +243,19 @@ internal class WeaponSynchronization
 				};
 
 				// Retrieve and parse sticker data (up to 5 slots)
-				for (int i = 0; i <= 4; i++)
+				for (int i = 0; i <= 5; i++)
 				{
 					// Access the sticker data dynamically using reflection
 					string stickerColumn = $"weapon_sticker_{i}";
-					var stickerData = ((IDictionary<string, object>)row!)[stickerColumn]; // Safely cast row to a dictionary
+					var rowDictionary = (IDictionary<string, object>)row!; // Safely cast row to a dictionary
 
-					if (string.IsNullOrEmpty(stickerData.ToString())) continue;
+					if (!rowDictionary.ContainsKey(stickerColumn) || string.IsNullOrEmpty(rowDictionary[stickerColumn]?.ToString()))
+					{
+						weaponInfo.Stickers.Add(new StickerInfo());
+						continue;
+					}
 						
-					var parts = stickerData.ToString()!.Split(';');
+					var parts = rowDictionary[stickerColumn].ToString()!.Split(';');
 
 					//"id;schema;x;y;wear;scale;rotation"
 					if (parts.Length != 7 ||
@@ -251,7 +265,11 @@ internal class WeaponSynchronization
 					    !float.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float stickerOffsetY) ||
 					    !float.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out float stickerWear) ||
 					    !float.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out float stickerScale) ||
-					    !float.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out float stickerRotation)) continue;
+					    !float.TryParse(parts[6], NumberStyles.Float, CultureInfo.InvariantCulture, out float stickerRotation))
+					{
+						weaponInfo.Stickers.Add(new StickerInfo());
+						continue;
+					}
 						
 					StickerInfo stickerInfo = new StickerInfo
 					{
@@ -489,6 +507,11 @@ internal class WeaponSynchronization
 					var sticker2 = BuildStickerDatabaseValue(weaponInfo, 2);
 					var sticker3 = BuildStickerDatabaseValue(weaponInfo, 3);
 					var sticker4 = BuildStickerDatabaseValue(weaponInfo, 4);
+					var sticker5 = BuildStickerDatabaseValue(weaponInfo, 5);
+					var nametag = weaponInfo.Nametag;
+					var stattrak = weaponInfo.StatTrak ? 1 : 0;
+					var stattrakCount = weaponInfo.StatTrakCount;
+					var keychain = BuildKeychainDatabaseValue(weaponInfo);
 
 					// Prepare the queries to check and update/insert weapon skin data
 					const string queryCheckExistence = "SELECT COUNT(*) FROM `wp_player_skins` WHERE `steamid` = @steamid AND `weapon_defindex` = @weaponDefIndex AND `weapon_team` = @weaponTeam";
@@ -504,17 +527,17 @@ internal class WeaponSynchronization
 					if (existingRecordCount > 0)
 					{
 						// Update existing record
-						query = "UPDATE `wp_player_skins` SET `weapon_paint_id` = @paintId, `weapon_wear` = @wear, `weapon_seed` = @seed, " +
-						        "`weapon_sticker_0` = @sticker0, `weapon_sticker_1` = @sticker1, `weapon_sticker_2` = @sticker2, `weapon_sticker_3` = @sticker3, `weapon_sticker_4` = @sticker4 " +
+						query = "UPDATE `wp_player_skins` SET `weapon_paint_id` = @paintId, `weapon_wear` = @wear, `weapon_seed` = @seed, `weapon_nametag` = @nametag, `weapon_stattrak` = @stattrak, `weapon_stattrak_count` = @stattrakCount, `weapon_keychain` = @keychain, " +
+						        "`weapon_sticker_0` = @sticker0, `weapon_sticker_1` = @sticker1, `weapon_sticker_2` = @sticker2, `weapon_sticker_3` = @sticker3, `weapon_sticker_4` = @sticker4, `weapon_sticker_5` = @sticker5 " +
 						        "WHERE `steamid` = @steamid AND `weapon_defindex` = @weaponDefIndex AND `weapon_team` = @weaponTeam";
-						parameters = new { steamid = player.SteamId, weaponDefIndex, weaponTeam = (int)teamId, paintId, wear, seed, sticker0, sticker1, sticker2, sticker3, sticker4 };
+						parameters = new { steamid = player.SteamId, weaponDefIndex, weaponTeam = (int)teamId, paintId, wear, seed, nametag, stattrak, stattrakCount, keychain, sticker0, sticker1, sticker2, sticker3, sticker4, sticker5 };
 					}
 					else
 					{
 						// Insert new record
-						query = "INSERT INTO `wp_player_skins` (`steamid`, `weapon_defindex`, `weapon_team`, `weapon_paint_id`, `weapon_wear`, `weapon_seed`, `weapon_sticker_0`, `weapon_sticker_1`, `weapon_sticker_2`, `weapon_sticker_3`, `weapon_sticker_4`) " +
-						        "VALUES (@steamid, @weaponDefIndex, @weaponTeam, @paintId, @wear, @seed, @sticker0, @sticker1, @sticker2, @sticker3, @sticker4)";
-						parameters = new { steamid = player.SteamId, weaponDefIndex, weaponTeam = (int)teamId, paintId, wear, seed, sticker0, sticker1, sticker2, sticker3, sticker4 };
+						query = "INSERT INTO `wp_player_skins` (`steamid`, `weapon_defindex`, `weapon_team`, `weapon_paint_id`, `weapon_wear`, `weapon_seed`, `weapon_nametag`, `weapon_stattrak`, `weapon_stattrak_count`, `weapon_keychain`, `weapon_sticker_0`, `weapon_sticker_1`, `weapon_sticker_2`, `weapon_sticker_3`, `weapon_sticker_4`, `weapon_sticker_5`) " +
+						        "VALUES (@steamid, @weaponDefIndex, @weaponTeam, @paintId, @wear, @seed, @nametag, @stattrak, @stattrakCount, @keychain, @sticker0, @sticker1, @sticker2, @sticker3, @sticker4, @sticker5)";
+						parameters = new { steamid = player.SteamId, weaponDefIndex, weaponTeam = (int)teamId, paintId, wear, seed, nametag, stattrak, stattrakCount, keychain, sticker0, sticker1, sticker2, sticker3, sticker4, sticker5 };
 					}
 
 					await connection.ExecuteAsync(query, parameters);
@@ -543,6 +566,25 @@ internal class WeaponSynchronization
 			sticker.Wear.ToString(CultureInfo.InvariantCulture),
 			sticker.Scale.ToString(CultureInfo.InvariantCulture),
 			sticker.Rotation.ToString(CultureInfo.InvariantCulture));
+	}
+
+	private static string BuildKeychainDatabaseValue(WeaponInfo weaponInfo)
+	{
+		var keyChain = weaponInfo.KeyChain;
+		if (keyChain == null)
+		{
+			return "0;0;0;0;0;0;0;0";
+		}
+
+		return string.Join(";",
+			keyChain.Id.ToString(CultureInfo.InvariantCulture),
+			keyChain.OffsetX.ToString(CultureInfo.InvariantCulture),
+			keyChain.OffsetY.ToString(CultureInfo.InvariantCulture),
+			keyChain.OffsetZ.ToString(CultureInfo.InvariantCulture),
+			keyChain.Seed.ToString(CultureInfo.InvariantCulture),
+			keyChain.Pattern.ToString(CultureInfo.InvariantCulture),
+			keyChain.Sticker.ToString(CultureInfo.InvariantCulture),
+			keyChain.Highlight.ToString(CultureInfo.InvariantCulture));
 	}
 
 	internal async Task SyncMusicToDatabase(PlayerInfo player, ushort music, CsTeam[] teams)

@@ -167,7 +167,9 @@ public partial class WeaponPaints
 	private static readonly bool IsWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
 	private const float DefaultFactoryNewWear = 0.0f;
-	private readonly ConcurrentDictionary<int, ConcurrentDictionary<int, float>> _temporaryPlayerWeaponWear = new();
+	private readonly ConcurrentDictionary<int, ConcurrentDictionary<(int DefIndex, int Paint), float>> _temporaryPlayerWeaponWear = new();
+
+	private readonly ConcurrentDictionary<int, int> _gloveApplyRevision = new();
 	
 	internal static IMenuApi? MenuApi;
 	private static readonly PluginCapability<IMenuApi> MenuCapability = new("menu:nfcore");
@@ -180,6 +182,9 @@ internal sealed class WeaponPaintCustomization
 {
 	internal float Wear { get; set; } = 0.0f;
 	internal int Seed { get; set; } = 0;
+
+	internal List<StickerInfo> Stickers { get; set; } = [];
+	internal KeyChainInfo? KeyChain { get; set; }
 }
 
 internal sealed class NativeGloveSnapshot

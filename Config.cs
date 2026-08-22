@@ -62,6 +62,9 @@ namespace WeaponPaints
 		[JsonPropertyName("CommandSticker")]
 		public List<string> CommandSticker { get; set; } = ["stickers", "sticker"];
 
+		[JsonPropertyName("CommandGen")]
+		public List<string> CommandGen { get; set; } = ["g", "gen"];
+
 		[JsonPropertyName("StickersVipOnly")]
 		public bool StickersVipOnly { get; set; } = false;
 
@@ -86,7 +89,7 @@ namespace WeaponPaints
 
 	public class WeaponPaintsConfig : BasePluginConfig
 	{
-        [JsonPropertyName("ConfigVersion")] public override int Version { get; set; } = 12;
+        [JsonPropertyName("ConfigVersion")] public override int Version { get; set; } = 13;
 
         [JsonPropertyName("SkinsLanguage")]
 		public string SkinsLanguage { get; set; } = "en";
