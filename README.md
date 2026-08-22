@@ -53,7 +53,7 @@ Then type the seed number in chat
 - any website that allow you to copy skin inspects link will work like: [csfloat](https://csfloat.com/db)/[steam](https://steamcommunity.com/market/search?appid=730)
 
 # Note: 
-any inspect link will work but links with `//` will work but you most remove one of `//` = `/`
+any inspect link will work but links with `//` works but you most remove one of `//` = `/`
 
 # =====================================
 
@@ -79,7 +79,7 @@ Unfinished, unoptimized and not fully functional ugly demo weapon paints plugin 
 - Added command **`!music`** to show menu with music
 - Added command **`!seed`** to change skins pattern
 - Added command **`!wear`** to change skins float
-- Added command **`!g`** to change skins with custom ones
+- Added command **`!g`** to change skins using inspect links
 - Translations support, submit a PR if you want to share your translation
 
 ## ⚙️ Requirements
