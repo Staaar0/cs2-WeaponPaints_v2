@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Globalization;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -382,18 +382,15 @@ public partial class WeaponPaints
 			}
 		}
 
-		var weapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
-		if (weapon == null || !weapon.IsValid)
+		if (!WeaponDefindex.TryGetValue(defindex, out var weaponClassName))
 			return;
-		if (weapon.DesignerName.Contains("knife") || weapon.DesignerName.Contains("bayonet"))
+		if (weaponClassName.Contains("knife") || weaponClassName.Contains("bayonet"))
 			return;
 
-		var weaponDefIndex = weapon.AttributeManager.Item.ItemDefinitionIndex;
-		if (defindex != weaponDefIndex)
-		{
-			player.Print("This code does not match your active weapon.");
-			return;
-		}
+		var weaponDefIndex = defindex;
+		var activeWeapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
+		var activeWeaponMatches = activeWeapon != null && activeWeapon.IsValid &&
+		                          activeWeapon.AttributeManager.Item.ItemDefinitionIndex == weaponDefIndex;
 
 		var stickersBySlot = new Dictionary<int, StickerInfo>();
 		var maxSlot = -1;
@@ -488,13 +485,31 @@ public partial class WeaponPaints
 			}
 		}
 
+		var targetTeam = player.Team;
+		if (targetTeam is not (CsTeam.Terrorist or CsTeam.CounterTerrorist))
+			return;
+
 		var playerWeapons = GPlayerWeaponsInfo.GetOrAdd(player.Slot, new ConcurrentDictionary<CsTeam, ConcurrentDictionary<int, WeaponInfo>>());
-		var teamWeapons = playerWeapons.GetOrAdd(player.Team, new ConcurrentDictionary<int, WeaponInfo>());
-		var weaponInfo = teamWeapons.GetOrAdd(weaponDefIndex, new WeaponInfo());
+		var teamWeapons = playerWeapons.GetOrAdd(targetTeam, new ConcurrentDictionary<int, WeaponInfo>());
+		var weaponInfo = teamWeapons.TryGetValue(weaponDefIndex, out var existingWeaponInfo)
+			? new WeaponInfo
+			{
+				Paint = existingWeaponInfo.Paint,
+				Seed = existingWeaponInfo.Seed,
+				Wear = existingWeaponInfo.Wear,
+				Nametag = existingWeaponInfo.Nametag,
+				StatTrak = existingWeaponInfo.StatTrak,
+				StatTrakCount = existingWeaponInfo.StatTrakCount,
+				Stickers = CloneStickers(existingWeaponInfo.Stickers),
+				KeyChain = CloneKeyChain(existingWeaponInfo.KeyChain)
+			}
+			: new WeaponInfo();
+
+		teamWeapons[weaponDefIndex] = weaponInfo;
 
 		if (weaponInfo.Paint > 0 && weaponInfo.Paint != paint)
 		{
-			SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
+			SavePaintCustomization(player.Slot, targetTeam, weaponDefIndex, weaponInfo.Paint, weaponInfo);
 		}
 
 		weaponInfo.Paint = paint;
@@ -516,10 +531,52 @@ public partial class WeaponPaints
 			IpAddress = player.IpAddress?.Split(":")[0]
 		};
 
-		RefreshWeapons(player);
+		if (activeWeaponMatches)
+			RefreshWeapons(player);
 		_ = Task.Run(async () => await WeaponSync.SyncWeaponPaintsToDatabase(playerInfo));
 
-		player.Print("Gen code applied.");
+		var paintInfo = GetPaintInfo(weaponDefIndex, paint);
+		var paintName = paintInfo?["paint_name"]?.ToString() ?? paint.ToString(CultureInfo.InvariantCulture);
+		var skinName = GetGenSkinName(paintName);
+		var weaponName = WeaponList.TryGetValue(weaponClassName, out var displayName) ? displayName : weaponClassName;
+		var rarityColor = GetGenRarityColor(paintInfo);
+		player.Print(Localizer["wp_gen_applied", $"{rarityColor}{skinName}{ChatColors.Default}", $"{ChatColors.Lime}{weaponName}{ChatColors.Default}"]);
+	}
+
+	private static string GetGenSkinName(string paintName)
+	{
+		var separator = paintName.IndexOf('|');
+		return separator >= 0 && separator + 1 < paintName.Length
+			? paintName[(separator + 1)..].Trim()
+			: paintName.Trim();
+	}
+
+	private static char GetGenRarityColor(JObject? paintInfo)
+	{
+		var rarityId = paintInfo?["rarity"]?["id"]?.ToString();
+		var rarityHex = paintInfo?["rarity"]?["color"]?.ToString();
+
+		return rarityId switch
+		{
+			"rarity_common_weapon" => ChatColors.Silver,
+			"rarity_uncommon_weapon" => ChatColors.LightBlue,
+			"rarity_rare_weapon" => ChatColors.Blue,
+			"rarity_mythical_weapon" => ChatColors.Purple,
+			"rarity_legendary_weapon" => ChatColors.Magenta,
+			"rarity_ancient_weapon" => ChatColors.Red,
+			"rarity_immortal_weapon" => ChatColors.Gold,
+			_ => rarityHex?.ToLowerInvariant() switch
+			{
+				"#b0c3d9" => ChatColors.Silver,
+				"#5e98d9" => ChatColors.LightBlue,
+				"#4b69ff" => ChatColors.Blue,
+				"#8847ff" => ChatColors.Purple,
+				"#d32ce6" => ChatColors.Magenta,
+				"#eb4b4b" => ChatColors.Red,
+				"#e4ae39" => ChatColors.Gold,
+				_ => ChatColors.Default
+			}
+		};
 	}
 
 	private struct InspectSticker

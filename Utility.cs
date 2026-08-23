@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Translations;
 using CounterStrikeSharp.API.Modules.Menu;
@@ -379,6 +379,7 @@ namespace WeaponPaints
 				["paint"] = paint.Value,
 				["image"] = item["image"]?.ToString() ?? localSkin?["image"]?.ToString() ?? string.Empty,
 				["paint_name"] = paintName,
+				["rarity"] = item["rarity"]?.DeepClone(),
 				["legacy_model"] = legacyModel,
 				["min_float"] = ReadFloat(item["min_float"]) ?? 0.0f,
 				["max_float"] = ReadFloat(item["max_float"]) ?? 1.0f,
