@@ -79,7 +79,7 @@ Unfinished, unoptimized and not fully functional ugly demo weapon paints plugin 
 - Added command **`!music`** to show menu with music
 - Added command **`!seed`** to change skins pattern
 - Added command **`!wear`** to change skins float
-- Added command **`!g`** to change skins with custom ones
+- Added command **`!g`** to change skins with inspect links
 - Translations support, submit a PR if you want to share your translation
 
 ## ⚙️ Requirements
