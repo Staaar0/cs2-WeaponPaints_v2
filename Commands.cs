@@ -25,6 +25,41 @@ public partial class WeaponPaints
 
 	private const int GenCodeTruncationLength = 64;
 
+	private readonly record struct GenStickerAnchor(uint Schema, float OffsetX, float OffsetY);
+
+	private static readonly Dictionary<(string Weapon, bool Legacy), GenStickerAnchor> GenFifthStickerAnchors = new()
+	{
+		[("weapon_ak47", false)] = new(1, 0.14699425f, 0.028994253f),
+		[("weapon_ak47", true)] = new(1, 0.12881461f, 0.03781461f),
+		[("weapon_awp", false)] = new(1, 0.26138917f, 0.041389152f),
+		[("weapon_bizon", false)] = new(1, -0.16905054f, -0.00005054744f),
+		[("weapon_bizon", true)] = new(1, 0.11569809f, 0.054698095f),
+		[("weapon_deagle", true)] = new(1, 0.13099661f, 0.031996623f),
+		[("weapon_elite", false)] = new(2, -0.017009478f, 0.09099052f),
+		[("weapon_elite", true)] = new(2, -0.034058955f, 0.06794105f),
+		[("weapon_galilar", false)] = new(1, 0.3629775f, 0.0299775f),
+		[("weapon_galilar", true)] = new(3, 0.079801366f, 0.011801365f),
+		[("weapon_glock", false)] = new(1, 0.31375384f, -0.07624616f),
+		[("weapon_m249", false)] = new(2, -0.26837832f, 0.1806217f),
+		[("weapon_m249", true)] = new(3, 0.0037358073f, 0.047735807f),
+		[("weapon_m4a1", false)] = new(1, 0.33399266f, 0.015992647f),
+		[("weapon_mac10", true)] = new(3, 0.12097203f, 0.06197203f),
+		[("weapon_mag7", false)] = new(3, -0.11744954f, 0.0085504595f),
+		[("weapon_mag7", true)] = new(2, -0.22446628f, 0.0075337263f),
+		[("weapon_mp9", false)] = new(2, -0.05625756f, 0.13074245f),
+		[("weapon_negev", false)] = new(1, 0.032989472f, 0.051989473f),
+		[("weapon_negev", true)] = new(3, -0.15602273f, -0.016022725f),
+		[("weapon_scar20", false)] = new(3, -0.0620967f, 0.013903301f),
+		[("weapon_scar20", true)] = new(2, 0.28459403f, -0.011405965f),
+		[("weapon_sg556", false)] = new(2, -0.06719466f, -0.02519466f),
+		[("weapon_sg556", true)] = new(2, -0.061953463f, -0.015953463f),
+		[("weapon_ssg08", false)] = new(1, 0.0839881f, 0.024988096f),
+		[("weapon_ssg08", true)] = new(3, -0.041737854f, -0.0067378553f),
+		[("weapon_tec9", false)] = new(1, 0.16984202f, 0.13384202f),
+		[("weapon_ump45", false)] = new(2, -0.060853533f, 0.06014647f),
+		[("weapon_ump45", true)] = new(3, -0.15774709f, -0.008747093f)
+	};
+
 	private enum SeedWearInputKind
 	{
 		Seed,
@@ -239,12 +274,17 @@ public partial class WeaponPaints
 		});
 	}
 
-	private void WarnGenCodeTruncated(CCSPlayerController player, string code, bool fromInspectLink)
+	private void ReportInvalidGenCode(CCSPlayerController player, CommandInfo commandInfo, string code, bool fromInspectLink)
 	{
-		if (!fromInspectLink && code.Length < GenCodeTruncationLength) return;
-		if (string.IsNullOrEmpty(Localizer["wp_gen_code_too_long"])) return;
+		if (commandInfo.CallingContext == CommandCallingContext.Chat && (fromInspectLink || code.Length >= GenCodeTruncationLength))
+		{
+			if (!string.IsNullOrEmpty(Localizer["wp_gen_code_too_long"]))
+				player.Print(Localizer["wp_gen_code_too_long", _config.Additional.CommandGen.FirstOrDefault() ?? "g"]);
+			return;
+		}
 
-		player.Print(Localizer["wp_gen_code_too_long", _config.Additional.CommandGen.FirstOrDefault() ?? "g"]);
+		if (!string.IsNullOrEmpty(Localizer["wp_gen_invalid"]))
+			player.Print(Localizer["wp_gen_invalid"]);
 	}
 
 	private static readonly uint[] GenCodeCrcTable = BuildGenCodeCrcTable();
@@ -303,13 +343,13 @@ public partial class WeaponPaints
 		}
 		catch
 		{
-			WarnGenCodeTruncated(player, code, fromInspectLink);
+			ReportInvalidGenCode(player, commandInfo, code, fromInspectLink);
 			return;
 		}
 
 		if (data.Length < 8)
 		{
-			WarnGenCodeTruncated(player, code, fromInspectLink);
+			ReportInvalidGenCode(player, commandInfo, code, fromInspectLink);
 			return;
 		}
 
@@ -322,7 +362,7 @@ public partial class WeaponPaints
 
 		if (!GenCodeChecksumValid(data))
 		{
-			WarnGenCodeTruncated(player, code, fromInspectLink);
+			ReportInvalidGenCode(player, commandInfo, code, fromInspectLink);
 			return;
 		}
 
@@ -388,9 +428,10 @@ public partial class WeaponPaints
 			return;
 
 		var weaponDefIndex = defindex;
-		var activeWeapon = player.PlayerPawn.Value?.WeaponServices?.ActiveWeapon.Value;
-		var activeWeaponMatches = activeWeapon != null && activeWeapon.IsValid &&
-		                          activeWeapon.AttributeManager.Item.ItemDefinitionIndex == weaponDefIndex;
+		var playerHasTargetWeapon = player.PlayerPawn.Value?.WeaponServices?.MyWeapons.Any(weapon =>
+			weapon.IsValid && weapon.Value != null && weapon.Value.IsValid &&
+			weapon.Value.AttributeManager.Item.ItemDefinitionIndex == weaponDefIndex) == true;
+		var fifthStickerAnchor = GetGenFifthStickerAnchor(weaponClassName, weaponDefIndex, paint);
 
 		var stickersBySlot = new Dictionary<int, StickerInfo>();
 		var maxSlot = -1;
@@ -441,7 +482,16 @@ public partial class WeaponPaints
 					slot = extraSlot++;
 				}
 			}
-			else if (slot >= 4)
+			else if (slot == 4)
+			{
+				if (fifthStickerAnchor is { } anchor)
+				{
+					schema = anchor.Schema;
+					parsed.OffsetX += anchor.OffsetX;
+					parsed.OffsetY += anchor.OffsetY;
+				}
+			}
+			else if (slot >= 5)
 			{
 				schema = (uint)parsed.Slot;
 			}
@@ -531,7 +581,7 @@ public partial class WeaponPaints
 			IpAddress = player.IpAddress?.Split(":")[0]
 		};
 
-		if (activeWeaponMatches)
+		if (playerHasTargetWeapon)
 			RefreshWeapons(player);
 		_ = Task.Run(async () => await WeaponSync.SyncWeaponPaintsToDatabase(playerInfo));
 
@@ -541,6 +591,12 @@ public partial class WeaponPaints
 		var weaponName = WeaponList.TryGetValue(weaponClassName, out var displayName) ? displayName : weaponClassName;
 		var rarityColor = GetGenRarityColor(paintInfo);
 		player.Print(Localizer["wp_gen_applied", $"{rarityColor}{skinName}{ChatColors.Default}", $"{ChatColors.Lime}{weaponName}{ChatColors.Default}"]);
+	}
+
+	private static GenStickerAnchor? GetGenFifthStickerAnchor(string weaponClassName, int weaponDefIndex, int paint)
+	{
+		var legacyModel = GetPaintInfo(weaponDefIndex, paint)?["legacy_model"]?.Value<bool>() ?? true;
+		return GenFifthStickerAnchors.TryGetValue((weaponClassName, legacyModel), out var anchor) ? anchor : null;
 	}
 
 	private static string GetGenSkinName(string paintName)
@@ -767,6 +823,7 @@ public partial class WeaponPaints
 			return;
 		
 		weaponInfo.StatTrak = !weaponInfo.StatTrak;
+		SavePaintCustomization(player.Slot, player.Team, weapon.AttributeManager.Item.ItemDefinitionIndex, weaponInfo.Paint, weaponInfo);
 		RefreshWeapons(player);
 
 		if (!string.IsNullOrEmpty(Localizer["wp_stattrak_action"]))
@@ -1111,12 +1168,16 @@ public partial class WeaponPaints
 		var customization = GetOrCreatePaintCustomization(slot, team, weaponDefIndex, paintId);
 		customization.Wear = ClampWearValue(weaponInfo.Wear, weaponDefIndex, paintId);
 		customization.Seed = GetSafeSeed(weaponDefIndex, paintId, weaponInfo.Seed);
+		customization.StatTrak = weaponInfo.StatTrak;
+		customization.StatTrakCount = weaponInfo.StatTrakCount;
 		customization.Stickers = CloneStickers(weaponInfo.Stickers);
 		customization.KeyChain = CloneKeyChain(weaponInfo.KeyChain);
 	}
 
 	private static void RestorePaintCustomization(WeaponInfo weaponInfo, WeaponPaintCustomization customization)
 	{
+		weaponInfo.StatTrak = customization.StatTrak;
+		weaponInfo.StatTrakCount = customization.StatTrakCount;
 		weaponInfo.Stickers = CloneStickers(customization.Stickers);
 		weaponInfo.KeyChain = CloneKeyChain(customization.KeyChain);
 	}
@@ -2866,6 +2927,9 @@ public partial class WeaponPaints
 		weaponInfo.Stickers.Clear();
 		weaponInfo.KeyChain = null;
 		SavePaintCustomization(player.Slot, player.Team, weaponDefIndex, weaponInfo.Paint, weaponInfo);
+
+		var playerWear = _temporaryPlayerWeaponWear.GetOrAdd(player.Slot, _ => new ConcurrentDictionary<(int, int), float>());
+		playerWear.TryAdd((weaponDefIndex, weaponInfo.Paint), weaponInfo.Wear);
 
 		if (weapon != null && weapon.IsValid)
 			GivePlayerWeaponSkin(player, weapon);

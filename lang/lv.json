@@ -68,5 +68,6 @@
 	"wp_sticker_search_clear": "Notīrīt meklēšanu",
 	"wp_sticker_search_no_results": "Uzlīmes nav atrastas",
 	"wp_gen_code_too_long": "{lightred}Gen kods ir pārāk garš čatam.{default} Atver konsoli un izmanto {lime}css_{0} <kods>",
+	"wp_gen_invalid": "{lightred}Nederīgs Gen kods",
 	"wp_gen_applied": "No jūsu koda piemērots {0} ierocim {1}."
 }

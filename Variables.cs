@@ -182,6 +182,8 @@ internal sealed class WeaponPaintCustomization
 {
 	internal float Wear { get; set; } = 0.0f;
 	internal int Seed { get; set; } = 0;
+	internal bool StatTrak { get; set; }
+	internal int StatTrakCount { get; set; }
 
 	internal List<StickerInfo> Stickers { get; set; } = [];
 	internal KeyChainInfo? KeyChain { get; set; }

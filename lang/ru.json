@@ -68,5 +68,6 @@
 	"wp_sticker_search_clear": "Сбросить поиск",
 	"wp_sticker_search_no_results": "Стикеры не найдены",
 	"wp_gen_code_too_long": "{lightred}Gen-код слишком длинный для чата.{default} Откройте консоль и используйте {lime}css_{0} <код>",
+	"wp_gen_invalid": "{lightred}Неверный Gen-код",
 	"wp_gen_applied": "Скин {0} для {1} применён из вашего кода."
 }

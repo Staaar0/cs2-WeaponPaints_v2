@@ -68,5 +68,6 @@
 	"wp_sticker_search_clear": "Wyczyść wyszukiwanie",
 	"wp_sticker_search_no_results": "Nie znaleziono naklejek",
 	"wp_gen_code_too_long": "{lightred}Kod gen jest za długi na czat.{default} Otwórz konsolę i użyj {lime}css_{0} <kod>",
+	"wp_gen_invalid": "{lightred}Nieprawidłowy kod Gen",
 	"wp_gen_applied": "Zastosowano {0} dla {1} z twojego kodu."
 }

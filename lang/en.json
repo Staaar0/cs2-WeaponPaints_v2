@@ -68,5 +68,6 @@
 	"wp_sticker_search_clear": "Clear search",
 	"wp_sticker_search_no_results": "No stickers found",
 	"wp_gen_code_too_long": "{lightred}Gen code is too long for chat.{default} Open the console and use {lime}css_{0} <code>",
+	"wp_gen_invalid": "{lightred}Invalid Gen code",
 	"wp_gen_applied": "Applied {0} for {1} from your code."
 }

@@ -68,5 +68,6 @@
 	"wp_sticker_search_clear": "清除搜索",
 	"wp_sticker_search_no_results": "未找到印花",
 	"wp_gen_code_too_long": "{lightred}Gen 代码对聊天来说太长了。{default}请打开控制台使用 {lime}css_{0} <代码>",
+	"wp_gen_invalid": "{lightred}无效的 Gen 代码",
 	"wp_gen_applied": "已从你的代码为 {1} 应用 {0}。"
 }
