@@ -3391,7 +3391,9 @@ public partial class WeaponPaints
 		}
 
 		Utilities.SetStateChanged(player, "CCSPlayerController", "m_pInventoryServices");
-		TouchGloveState(pawn);
+		unchecked { pawn.EconGlovesChanged++; }
+		Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_nEconGlovesChanged");
+		SetBodygroup(pawn, "first_or_third_person", 0);
 		if (GPlayersForceGloveKnifeRefresh.TryRemove(player.Slot, out _))
 		{
 			ForceKnifeSlotRefresh(player);
