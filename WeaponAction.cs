@@ -6,7 +6,6 @@ using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
-using Newtonsoft.Json.Linq;
 
 namespace WeaponPaints
 {
@@ -53,7 +52,6 @@ namespace WeaponPaints
 			
 			weapon.AttributeManager.Item.AccountID = (uint)player.SteamID;
 			
-			List<JObject> skinInfo;
 			bool isLegacyModel;
 
 			if (_config.Additional.GiveRandomSkin &&
@@ -79,13 +77,8 @@ namespace WeaponPaints
 				if (fallbackPaintKit == 0)
 					return;
 			
-				skinInfo = SkinsList
-					.Where(w => 
-						w["weapon_defindex"]?.ToObject<int>() == weaponDefIndex && 
-						w["paint"]?.ToObject<int>() == fallbackPaintKit)
-					.ToList();
-				
-				isLegacyModel = skinInfo.Count <= 0 || skinInfo[0].Value<bool>("legacy_model");
+				var randomPaintInfo = GetPaintInfo(weaponDefIndex, fallbackPaintKit);
+				isLegacyModel = bool.TryParse(randomPaintInfo?["legacy_model"]?.ToString(), out var randomLegacyModel) && randomLegacyModel;
 				UpdatePlayerWeaponMeshGroupMask(player, weapon, isLegacyModel);
 				return;
 			}
@@ -128,14 +121,8 @@ namespace WeaponPaints
 
 			if (weaponInfo.KeyChain != null) SetKeychain(player, weapon);
 			if (weaponInfo.Stickers.Count > 0) SetStickers(player, weapon);
-
-			skinInfo = SkinsList
-				.Where(w => 
-					w["weapon_defindex"]?.ToObject<int>() == weaponDefIndex && 
-					w["paint"]?.ToObject<int>() == fallbackPaintKit)
-				.ToList();
-				
-			isLegacyModel = skinInfo.Count <= 0 || skinInfo[0].Value<bool>("legacy_model");
+			var paintInfo = GetPaintInfo(weaponDefIndex, fallbackPaintKit);
+			isLegacyModel = bool.TryParse(paintInfo?["legacy_model"]?.ToString(), out var paintLegacyModel) && paintLegacyModel;
 			UpdatePlayerWeaponMeshGroupMask(player, weapon, isLegacyModel);
 		}
 		
@@ -435,7 +422,7 @@ namespace WeaponPaints
 					}, TimerFlags.STOP_ON_MAPCHANGE);
 		}
 
-		private void GivePlayerGloves(CCSPlayerController player, bool applyImmediately = false, bool refreshKnife = true)
+		private void GivePlayerGloves(CCSPlayerController player, bool applyImmediately = false, bool refreshKnife = true, bool refreshGlovesAfterKnife = false)
 		{
 			if (!Utility.IsPlayerValid(player) || (LifeState_t)player.LifeState != LifeState_t.LIFE_ALIVE) return;
 
@@ -504,14 +491,21 @@ namespace WeaponPaints
 
 					currentItem.Initialized = true;
 				
-					TouchGloveState(currentPawn);
-					if (refreshKnife && activeSlotCommand == "slot3")
+					if (refreshKnife && activeSlotCommand == "slot3" && refreshGlovesAfterKnife)
 					{
-						RefreshKnifeEntityForGloves(currentPlayer);
+						RefreshKnifeEntityForGloves(currentPlayer, true);
 					}
 					else
 					{
-						RestoreActiveWeaponSlot(currentPlayer, activeSlotCommand);
+						TouchGloveState(currentPawn);
+						if (refreshKnife && activeSlotCommand == "slot3")
+						{
+							RefreshKnifeEntityForGloves(currentPlayer);
+						}
+						else
+						{
+							RestoreActiveWeaponSlot(currentPlayer, activeSlotCommand);
+						}
 					}
 				}
 				catch (Exception) { }

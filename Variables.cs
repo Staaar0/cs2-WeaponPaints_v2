@@ -88,6 +88,7 @@ public partial class WeaponPaints
 	internal static List<JObject> AgentsList = [];
 	internal static List<JObject> MusicList = [];
 	internal static List<JObject> StickersList = [];
+	internal static readonly ConcurrentDictionary<(int WeaponDefIndex, int Paint), JObject> GenPaintMetadata = new();
 	internal static WeaponSynchronization? WeaponSync;
 	private static bool _gBCommandsAllowed = true;
 	private readonly Dictionary<int, string> _playerWeaponImage = new();

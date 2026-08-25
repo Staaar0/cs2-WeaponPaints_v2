@@ -213,6 +213,8 @@ namespace WeaponPaints
 
 		internal static async Task LoadSkinDataAsync(string moduleDirectory, WeaponPaintsConfig config, ILogger logger)
 		{
+			WeaponPaints.GenPaintMetadata.Clear();
+
 			try
 			{
 				if (!string.IsNullOrWhiteSpace(config.SkinApiURL))
@@ -227,6 +229,9 @@ namespace WeaponPaints
 			}
 
 			LoadLocalSkinData(moduleDirectory, config.SkinsLanguage, logger);
+
+			if (!string.IsNullOrWhiteSpace(config.SkinApiURL))
+				await LoadGenPaintMetadataAsync(config, logger).ConfigureAwait(false);
 		}
 
 		internal static void LoadLocalSkinData(string moduleDirectory, string language, ILogger logger)
@@ -239,6 +244,52 @@ namespace WeaponPaints
 			LoadStickersFromFile(Path.Combine(moduleDirectory, "data", $"stickers_{language}.json"), logger);
 		}
 
+		private static async Task LoadGenPaintMetadataAsync(WeaponPaintsConfig config, ILogger logger)
+		{
+			using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+			var baseUrl = config.SkinApiURL.TrimEnd('/');
+			var languages = new[] { NormalizeApiLanguage(config.SkinsLanguage), "en" }.Distinct(StringComparer.OrdinalIgnoreCase);
+
+			Exception? lastError = null;
+
+			foreach (var language in languages)
+			{
+				try
+				{
+					var json = await client.GetStringAsync($"{baseUrl}/{language}/skins.json").ConfigureAwait(false);
+
+					foreach (var item in JArray.Parse(json).OfType<JObject>())
+					{
+						var weaponDefIndex = TryReadInt(item["weapon_defindex"]) ?? TryReadInt(item["weapon"]?["weapon_id"]);
+						var paint = TryReadInt(item["paint"]) ?? TryReadInt(item["paint_index"]);
+						var paintName = item["paint_name"]?.ToString() ?? item["name"]?.ToString();
+
+						if (weaponDefIndex == null || paint == null || string.IsNullOrWhiteSpace(paintName))
+							continue;
+
+						WeaponPaints.GenPaintMetadata[(weaponDefIndex.Value, paint.Value)] = new JObject
+						{
+							["weapon_defindex"] = weaponDefIndex.Value,
+							["paint"] = paint.Value,
+							["paint_name"] = paintName,
+							["rarity"] = item["rarity"]?.DeepClone(),
+							["legacy_model"] = ReadBool(item["legacy_model"]) ?? false,
+							["image"] = item["image"]?.ToString() ?? string.Empty
+						};
+					}
+
+					return;
+				}
+				catch (Exception ex)
+				{
+					lastError = ex;
+				}
+			}
+
+			if (lastError != null)
+				logger.LogWarning(lastError, "Failed to load Gen skin metadata from online API.");
+		}
+
 		private static async Task LoadOnlineSkinDataAsync(string moduleDirectory, WeaponPaintsConfig config, ILogger logger)
 		{
 			using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
@@ -246,11 +297,6 @@ namespace WeaponPaints
 			var apiLanguage = NormalizeApiLanguage(config.SkinsLanguage);
 
 			var skinsJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/skins.json").ConfigureAwait(false);
-			var agentsJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/agents.json").ConfigureAwait(false);
-			var musicJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/music_kits.json").ConfigureAwait(false);
-			var collectiblesJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/collectibles.json").ConfigureAwait(false);
-			var stickersJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/stickers.json").ConfigureAwait(false);
-
 			var skins = LoadDefaultEntriesFromLocalFile(moduleDirectory, config.SkinsLanguage, "skins", token => token["paint"]?.ToString() == "0");
 			var gloves = LoadDefaultEntriesFromLocalFile(moduleDirectory, config.SkinsLanguage, "gloves", token => token["paint"]?.ToString() == "0");
 			var localSkinLookup = LoadLocalSkinLookup(moduleDirectory, config.SkinsLanguage);
@@ -271,10 +317,50 @@ namespace WeaponPaints
 
 			WeaponPaints.SkinsList = skins;
 			WeaponPaints.GlovesList = gloves;
-			WeaponPaints.AgentsList = ConvertApiAgentsToPluginAgents(agentsJson);
-			WeaponPaints.MusicList = ConvertApiMusicToPluginMusic(musicJson);
-			WeaponPaints.PinsList = ConvertApiCollectiblesToPluginPins(collectiblesJson);
-			WeaponPaints.StickersList = ConvertApiStickersToPluginStickers(stickersJson);
+
+			try
+			{
+				var agentsJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/agents.json").ConfigureAwait(false);
+				WeaponPaints.AgentsList = ConvertApiAgentsToPluginAgents(agentsJson);
+			}
+			catch (Exception ex)
+			{
+				logger.LogWarning(ex, "Failed to load agents from online API. Using bundled JSON data.");
+				LoadAgentsFromFile(Path.Combine(moduleDirectory, "data", $"agents_{config.SkinsLanguage}.json"), logger);
+			}
+
+			try
+			{
+				var musicJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/music_kits.json").ConfigureAwait(false);
+				WeaponPaints.MusicList = ConvertApiMusicToPluginMusic(musicJson);
+			}
+			catch (Exception ex)
+			{
+				logger.LogWarning(ex, "Failed to load music kits from online API. Using bundled JSON data.");
+				LoadMusicFromFile(Path.Combine(moduleDirectory, "data", $"music_{config.SkinsLanguage}.json"), logger);
+			}
+
+			try
+			{
+				var collectiblesJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/collectibles.json").ConfigureAwait(false);
+				WeaponPaints.PinsList = ConvertApiCollectiblesToPluginPins(collectiblesJson);
+			}
+			catch (Exception ex)
+			{
+				logger.LogWarning(ex, "Failed to load collectibles from online API. Using bundled JSON data.");
+				LoadPinsFromFile(Path.Combine(moduleDirectory, "data", $"collectibles_{config.SkinsLanguage}.json"), logger);
+			}
+
+			try
+			{
+				var stickersJson = await client.GetStringAsync($"{baseUrl}/{apiLanguage}/stickers.json").ConfigureAwait(false);
+				WeaponPaints.StickersList = ConvertApiStickersToPluginStickers(stickersJson);
+			}
+			catch (Exception ex)
+			{
+				logger.LogWarning(ex, "Failed to load stickers from online API. Using bundled JSON data.");
+				LoadStickersFromFile(Path.Combine(moduleDirectory, "data", $"stickers_{config.SkinsLanguage}.json"), logger);
+			}
 
 			logger.LogInformation("Loaded skin data from online JSON API ({ApiUrl}, language {Language}).", baseUrl, apiLanguage);
 		}
